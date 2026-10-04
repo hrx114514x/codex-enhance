@@ -43,8 +43,9 @@ export function outputSpeedView(turn,now) {
  for(const request of requests) {
   const available=items.filter(item=>item.completedAtMs>previous&&item.completedAtMs<=request.completedAtMs);
   const completedAtMs=available.length?Math.max(...available.map(i=>i.completedAtMs)):null;
-  // A completed client tool/compaction separates generation windows even when
-  // an older usage event was missing. Fast tools can finish before the usage
+  // A completed client tool/compaction separates generation windows. If one
+  // usage record straddles a tool, its token count cannot be split reliably.
+  // Fast tools can finish before the usage
   // log is flushed: boundaries after the last generated item belong next time.
   const boundary=Math.max(previous,...m.boundaries.filter(at=>completedAtMs!==null&&at<completedAtMs));
   const candidates=available.filter(item=>item.completedAtMs>boundary);
@@ -52,7 +53,8 @@ export function outputSpeedView(turn,now) {
   const startedAtMs=starts.length?Math.min(...starts):null;
   const durationMs=startedAtMs!==null&&completedAtMs!==null?completedAtMs-startedAtMs:null;
   const partial=m.trimmedBeforeMs!==null&&m.trimmedBeforeMs>boundary;
-  const missing=startedAtMs===null||startedAtMs<boundary||completedAtMs===null||request.completedAtMs-completedAtMs>5000||partial||candidates.some(item=>item.completedAtMs<startedAtMs);
+  const crossedTool=available.some(item=>item.completedAtMs<=boundary);
+  const missing=startedAtMs===null||startedAtMs<boundary||completedAtMs===null||request.completedAtMs-completedAtMs>5000||partial||crossedTool||candidates.some(item=>item.completedAtMs<startedAtMs);
   const reason=missing?'missing_timing':request.outputTokens===0?'no_output':durationMs<250?'short_sample':null;
   samples.push({state:reason?'unavailable':'measured',reason,approximate:true,
    tokensPerSecond:reason?null:request.outputTokens*1000/durationMs,

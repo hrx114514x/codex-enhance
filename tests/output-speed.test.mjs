@@ -31,10 +31,10 @@ test('earlier output without a start cannot be timed from a later message to inf
  const {s,record}=setup();record(1000,'response_item',{type:'function_call',id:'early-call'});generated(record,'later',2000,3000,'AgentMessage');usage(record,'response',3100,100);
  assert.equal(speed(s).tokensPerSecond,null);assert.equal(speed(s).reason,'missing_timing');
 });
-test('model output across a tool boundary is never merged into one slow generation window',()=>{
+test('one usage count spanning a tool boundary cannot be timed from only its final output',()=>{
  const {s,record}=setup();generated(record,'old',1000,2000);record(10000,'response_item',{type:'custom_tool_call_output',call_id:'tool'});
  generated(record,'new',11000,12000);usage(record,'response',12100,20);
- assert.equal(speed(s).tokensPerSecond,20);assert.equal(speed(s).durationMs,1000);
+ assert.equal(speed(s).tokensPerSecond,null);assert.equal(speed(s).reason,'missing_timing');
 });
 test('ambiguous overlapping output and compaction leave speed unavailable rather than inflating the number',()=>{
  const {s,record}=setup();generated(record,'crossing',1000,8000);record(5000,'response_item',{type:'function_call_output',call_id:'tool'});usage(record,'response',8100,100);
