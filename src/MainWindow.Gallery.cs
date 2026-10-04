@@ -18,6 +18,10 @@ public partial class MainWindow
         long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var data = Demo(false);
         data["title"] = "示例任务 · 优化项目界面";
+        data["outputSpeed"]=new JsonObject { ["state"]="measured",["tokensPerSecond"]=42.5,["outputTokens"]=1700,["reasoningTokens"]=1200,["durationMs"]=40000,["recordedAtMs"]=now,["approximate"]=true };
+        var speedSamples=new JsonArray();var rates=new[]{38.2,41.8,35.4,44.1,42.5};
+        for(int i=0;i<rates.Length;i++)speedSamples.Add(new JsonObject { ["state"]="measured",["tokensPerSecond"]=rates[i],["recordedAtMs"]=now-(rates.Length-1-i)*60000L });
+        data["outputSpeed"]!["samples"]=speedSamples;
         data["connection"]!["message"] = "预览 · 示例数据";
         data["quota"] = JsonNode.Parse("""
           {"state":"ready","plan":"pro","pricingDate":"2026-09-27","indexing":false,"windows":[{"minutes":10080,"usedPercent":24,"remainingPercent":76,"quotaBaseUsd":60,"quotaFastPremiumUsd":24,"astraPremiumUsd":8,"astraFastPremiumUsd":3,"usd":102,"requests":128,"tokens":18200000,"estimateReasons":[]}]}
@@ -46,6 +50,16 @@ public partial class MainWindow
         data["model"]="gpt-5.6-sol";
         settings.Theme = "dark"; ApplyTheme(); disclosure = new Disclosure(true); ApplySnapshot(data);
         Capture(Path.Combine(directory, "overview.png"));
+        bool speedVisible=OutputSpeedText.Text=="≈42.5"&&OutputSpeedSource.Text=="最近请求";
+        OutputSpeedButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        bool speedOpens=detailWindow?.Title=="Codex · 输出速度";
+        CaptureGalleryDetail(Path.Combine(directory,"output-speed.png"));detailWindow?.Close();detailWindow=null;
+        var speedPending=data.DeepClone().AsObject();speedPending["outputSpeed"]=new JsonObject { ["state"]="pending" };
+        ApplySnapshot(speedPending);bool newTurnClearsSpeed=OutputSpeedText.Text=="—"&&OutputSpeedSource.Text=="等待记录";
+        speedPending["outputSpeed"]=new JsonObject { ["state"]="unavailable",["reason"]="missing_timing" };
+        ApplySnapshot(speedPending);bool missingTimingClear=OutputSpeedText.Text=="—"&&OutputSpeedSource.Text=="时点未记录";
+        ApplySnapshot(data);
+        File.WriteAllText(Path.Combine(directory,"output-speed-check.json"),System.Text.Json.JsonSerializer.Serialize(new {speedVisible,speedOpens,newTurnClearsSpeed,missingTimingClear,passed=speedVisible&&speedOpens&&newTurnClearsSpeed&&missingTimingClear},Settings.JsonOptions));
         ModelButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
         bool modelEntryWorks=detailWindow?.Title=="Codex · 当前模型"&&ModelText.Text=="GPT-6 Sol";
         CaptureGalleryDetail(Path.Combine(directory,"upstream-model.png"));detailWindow?.Close();detailWindow=null;
@@ -93,6 +107,7 @@ public partial class MainWindow
         CaptureScene(Path.Combine(directory,"floating-light.png"));
         ApplySnapshot(completed);Capture(Path.Combine(directory,"completed-light.png"));ApplySnapshot(data);
         OpenMetrics(this,new RoutedEventArgs());CaptureGalleryDetail(Path.Combine(directory,"performance-light.png"));
+        OpenOutputSpeed(this,new RoutedEventArgs());CaptureGalleryDetail(Path.Combine(directory,"output-speed-light.png"));
         OpenModels(this,new RoutedEventArgs());CaptureGalleryDetail(Path.Combine(directory,"upstream-model-light.png"));
         OpenQuotaHistory(this,new RoutedEventArgs());CaptureGalleryDetail(Path.Combine(directory,"weekly-history-light.png"));
         detailWindow?.Close();detailWindow=null;

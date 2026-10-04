@@ -4,6 +4,7 @@ import { performanceView, turnProblemNotice, firstOutputView } from './performan
 import { addTimingRange, observeTiming, elapsedTurnMs } from './timing.mjs';
 import {observeActivity,activityView} from './activity.mjs';
 import {modelId,observeReroute,modelIdentityView} from './models.mjs';
+import {recordOutputItem,recordOutputUsage,recordOutputBoundary,outputSpeedView} from './output-speed.mjs';
 
 const finite = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
 export function milliseconds(value) {
@@ -196,9 +197,14 @@ export class ThreadState {
       } return;
     }
     if (row.type === 'token_usage_record') {
+      recordOutputUsage(this.turns.get(p.turn_id),p,at);
       this.applyUsage({ usage: p.usage, total: p.thread_token_usage ?? p.total_token_usage }, at); return;
     }
     if(row.type==='response_item') {
+      const owner=this.turns.get(p.turn_id??this.latestTurnId);
+      if(p.type==='reasoning'||p.type==='message'&&p.role==='assistant'||['function_call','custom_tool_call'].includes(p.type))
+        recordOutputItem(owner,{id:p.id??p.call_id,completedAtMs:at});
+      if(['function_call_output','custom_tool_call_output'].includes(p.type))recordOutputBoundary(owner,at);
       // Sleep summaries have no status in the desktop store. Pair the explicit
       // call/result lifecycle instead of treating every historical summary as live.
       if(p.type==='function_call'&&p.call_id&&(p.name==='clock.sleep'||p.namespace==='clock'&&p.name==='sleep')) {
@@ -247,6 +253,8 @@ export class ThreadState {
     } else if (kind === 'item_completed' || kind === 'item_started') {
       const item = p.item ?? {}, completed = kind === 'item_completed';
       const owner = this.turns.get(p.turn_id ?? this.latestTurnId);
+      if(completed&&/^(agentmessage|reasoning)$/i.test(item.type??''))
+        recordOutputItem(owner,{id:item.id,startedAtMs:p.started_at_ms,completedAtMs:p.completed_at_ms,explicit:true});
       if (owner && String(item.type).toLowerCase() === 'usermessage') owner.hasUserInput = true;
       if (owner && String(item.type).toLowerCase() === 'agentmessage' && (String(item.text ?? '').trim() || (item.content ?? []).some(c => typeof c.text === 'string' && c.text.trim()))) owner.hasReply = true;
       if (/contextcompaction/i.test(item.type ?? '')) {
@@ -256,6 +264,7 @@ export class ThreadState {
         if (completed) {
           if (turn) {
             turn.compactionCompletedAtMs = p.completed_at_ms ?? at;
+            recordOutputBoundary(turn,turn.compactionCompletedAtMs);
             addTimingRange(turn,'compacting',p.started_at_ms??turn.compactionStartedAtMs,turn.compactionCompletedAtMs);
             if (turn.phase === 'compacting' && !turn.completedAtMs) turn.phase = 'working';
           }
@@ -263,8 +272,10 @@ export class ThreadState {
           this.lastCompaction.durationMs = p.completed_at_ms != null && p.started_at_ms != null ? p.completed_at_ms - p.started_at_ms : null;
         }
       }
-      this.addTool(normalizeTool(item, { completed, turnId: p.turn_id ?? this.latestTurnId,
-        timestamp: at, startedAtMs: p.started_at_ms, completedAtMs: p.completed_at_ms, source: 'log' }));
+      const tool=normalizeTool(item, { completed, turnId: p.turn_id ?? this.latestTurnId,
+        timestamp: at, startedAtMs: p.started_at_ms, completedAtMs: p.completed_at_ms, source: 'log' });
+      if(completed&&tool)recordOutputBoundary(owner,tool.timingEndAtMs??at);
+      this.addTool(tool);
     }
   }
   runtime(data, now = Date.now()) {
@@ -351,6 +362,7 @@ export class ThreadState {
       performance: performanceView(this, current, now, runtimeConnected),
       activity: activityView(turn,current,now,runtimeConnected),
       modelIdentity: modelIdentityView(turn,this.model),
+      outputSpeed: outputSpeedView(turn,now),
       tools: { running: running.filter(t => t.status === 'running').length, completed: current.filter(t => t.status === 'completed').length,
         attention: attention.length, notes: notes.length, highestSeverity, levelCounts, issues: attention.slice(0, 20), items: all.slice(0, 100), runtimeAvailable: runtimeConnected },
       updatedAtMs: now };

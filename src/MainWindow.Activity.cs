@@ -31,6 +31,7 @@ public partial class MainWindow
     }
     private void UpdateActivity(bool stale)
     {
+        UpdateOutputSpeed();
         double now=renderMode?(N(snapshot["activity"]?["observedAtMs"])??0):DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         if(preview&&!renderMode&&snapshot["activity"] is JsonObject sample)sample["observedAtMs"]=now;
         var view=ActivityPresentation(snapshot,now,stale);

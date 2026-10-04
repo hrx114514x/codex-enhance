@@ -29,13 +29,19 @@
        <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right"><TextBlock x:Name="PhaseTimeCaption" Text="当前阶段" HorizontalAlignment="Right" FontSize="10" Foreground="{DynamicResource Faint}"/><TextBlock x:Name="ElapsedText" Text="—" FontSize="21" Margin="0,1,0,0" FontWeight="Medium" Typography.NumeralAlignment="Tabular" HorizontalAlignment="Right"/></StackPanel>
       </Grid>
      </Button>
-     <Button x:Name="MetricsButton" Margin="15,4,15,15" Padding="3" HorizontalContentAlignment="Stretch" Click="OpenMetrics" ToolTip="查看上下文、缓存和首字指标" AutomationProperties.Name="查看性能详情">
+     <Button x:Name="MetricsButton" Margin="15,4,15,6" Padding="3" HorizontalContentAlignment="Stretch" Click="OpenMetrics" ToolTip="查看上下文、缓存和首字指标" AutomationProperties.Name="查看性能详情">
       <Grid Width="314"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/></Grid.ColumnDefinitions>
        <StackPanel Margin="0,0,13,0"><TextBlock Text="上下文" FontSize="11" Foreground="{DynamicResource Muted}"/><TextBlock x:Name="ContextText" Text="—" FontSize="22" FontWeight="Medium" Margin="0,5,0,0" Typography.NumeralAlignment="Tabular"/><Grid Margin="0,8,0,3" Height="3" Width="83" HorizontalAlignment="Left"><Border Background="{DynamicResource Track}" CornerRadius="1.5"/><Border x:Name="ContextFill" Width="0" HorizontalAlignment="Left" Background="{DynamicResource Accent}" CornerRadius="1.5"/></Grid></StackPanel>
        <Border Grid.Column="1" Background="{DynamicResource Line}" Margin="0,3"/>
        <StackPanel Grid.Column="2" Margin="15,0,0,0"><TextBlock Text="缓存命中" FontSize="11" Foreground="{DynamicResource Muted}"/><TextBlock x:Name="CacheText" Text="—" FontSize="22" FontWeight="Medium" Margin="0,5,0,0" Typography.NumeralAlignment="Tabular"/><TextBlock Text="最近请求" FontSize="10" Foreground="{DynamicResource Faint}" Margin="0,5,0,0"/></StackPanel>
        <Border Grid.Column="3" Background="{DynamicResource Line}" Margin="0,3"/>
        <StackPanel Grid.Column="4" Margin="15,0,0,0"><TextBlock x:Name="FirstTokenLabel" Text="首字（日志）" FontSize="10" Foreground="{DynamicResource Muted}"/><TextBlock x:Name="FirstTokenText" Text="—" FontSize="22" FontWeight="Medium" Margin="0,5,0,0" Typography.NumeralAlignment="Tabular"/><TextBlock x:Name="FirstTokenSource" Text="暂无记录" FontSize="10" Foreground="{DynamicResource Faint}" Margin="0,5,0,0"/></StackPanel>
+      </Grid>
+     </Button>
+     <Button x:Name="OutputSpeedButton" Margin="15,0,15,12" Padding="3,5" HorizontalContentAlignment="Stretch" Click="OpenOutputSpeed" AutomationProperties.Name="查看输出速度">
+      <Grid Width="314"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+       <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="输出速度" FontSize="11" Foreground="{DynamicResource Muted}"/><TextBlock x:Name="OutputSpeedSource" Text="等待记录" FontSize="10" Foreground="{DynamicResource Faint}" Margin="8,1,0,0"/></StackPanel>
+       <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><TextBlock x:Name="OutputSpeedText" Text="—" FontSize="18" FontWeight="Medium" Typography.NumeralAlignment="Tabular"/><TextBlock Text="tok/s" FontSize="10" Foreground="{DynamicResource Muted}" VerticalAlignment="Bottom" Margin="5,0,0,3"/></StackPanel>
       </Grid>
      </Button>
      <Border Height="1" Background="{DynamicResource Line}" Margin="18,0"/>
