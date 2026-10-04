@@ -15,6 +15,11 @@ public partial class MainWindow
     {
         if (!preview || !renderMode) throw new InvalidOperationException("Gallery requires render mode.");
         Directory.CreateDirectory(directory);
+        bool limitedQueryWorks=HostProcessIdentity.ImagePath((uint)Environment.ProcessId)?.EndsWith("CodexEnhance.exe",StringComparison.OrdinalIgnoreCase)==true;
+        bool hostIdentityScoped=HostProcessIdentity.IsCodexPath(@"C:\Program Files\WindowsApps\OpenAI.Codex_1_x64__test\app\ChatGPT.exe")&&
+            !HostProcessIdentity.IsCodexPath(@"C:\Program Files\WindowsApps\OpenAI.ChatGPT_1_x64__test\app\ChatGPT.exe")&&
+            !HostProcessIdentity.IsCodexPath(@"C:\Program Files\WindowsApps\OpenAI.Codex_1_x64__test\app\resources\codex.exe");
+        File.WriteAllText(Path.Combine(directory,"host-identity-check.json"),System.Text.Json.JsonSerializer.Serialize(new {limitedQueryWorks,hostIdentityScoped,passed=limitedQueryWorks&&hostIdentityScoped},Settings.JsonOptions));
         long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var data = Demo(false);
         data["title"] = "示例任务 · 优化项目界面";

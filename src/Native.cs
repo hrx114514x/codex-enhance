@@ -49,7 +49,6 @@ internal static class Native
     internal static bool IsCodex(IntPtr window)
     {
         GetWindowThreadProcessId(window, out uint pid);
-        try { using var process = Process.GetProcessById((int)pid); return process.ProcessName.Equals("ChatGPT", StringComparison.OrdinalIgnoreCase) && (process.MainModule?.FileName?.Contains("OpenAI.Codex", StringComparison.OrdinalIgnoreCase) ?? false); }
-        catch { return false; }
+        return HostProcessIdentity.IsCodex(pid);
     }
 }
