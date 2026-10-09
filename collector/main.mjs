@@ -6,6 +6,7 @@ import { Catalog } from './catalog.mjs';
 import { DesktopLink } from './cdp.mjs';
 import { CapabilityMonitor } from './capabilities.mjs';
 import { WeeklyQuota } from './quota.mjs';
+import {ConversationCost} from './conversation-cost.mjs';
 import {VoiceUsage} from './voice.mjs';
 
 const args = process.argv.slice(2);
@@ -16,6 +17,7 @@ const seed = value('--thread', null);
 const catalog = new Catalog(home), desktop = new DesktopLink(stateDir);
 const capabilities = new CapabilityMonitor();
 const weekly = new WeeklyQuota(home, stateDir);
+const conversationCost = new ConversationCost(stateDir,{salt:weekly.salt,onMissing:models=>weekly.pricing.observeMissing(models)});
 const voiceUsage = new VoiceUsage(stateDir);
 let manualId = seed, lockedId = null, follow = true, lastId = null, stopping = false;
 let timedState = null;
@@ -33,7 +35,9 @@ rl.on('line', line => {
     if (command.type === 'checkTools') capabilities.refresh(command.threadId ?? lastId);
     if (command.type === 'refreshQuota') weekly.refresh();
     if (command.type === 'checkVoice') voiceUsage.inspect();
-    if (command.type === 'quotaOptions') weekly.setOptions(command.options);
+    if (command.type === 'quotaOptions') { weekly.setOptions(command.options); conversationCost.setOptions(command.options); }
+    if (command.type === 'conversationCostAutomatic') conversationCost.setAutomatic(command.enabled);
+    if (command.type === 'refreshConversationCost') { conversationCost.refresh(command.threadId); weekly.pricing.refresh(); }
   } catch {}
 });
 rl.on('close', () => { stopping = true; });
@@ -59,16 +63,17 @@ while (!stopping) {
     const recentThreads = catalog.recent();
     if (id) {
       const data = catalog.sample(id);
+      const cost = conversationCost.sample(id,data?.files,weekly.pricing.catalog);
       if (data) {
         timedState = data.state;
         if (current.runtime && (lockedId || id === current.threadId || !follow)) data.state.runtime(current.runtime);
         const snapshot = data.state.snapshot(Date.now(), desktop.connected && Boolean(current.runtime));
         lastId = id;
-        write({ schemaVersion: 1, ...snapshot, connection, toolHealth, quota, voice, recentThreads, historyLoading: !data.caughtUp, readErrors: data.errors });
-      } else { pauseTiming(); write({ schemaVersion: 1, threadId: id, phase: 'unknown', connection: { ...connection, message: '未找到这个任务的本地记录' }, quota, voice, recentThreads, updatedAtMs: Date.now() }); }
-    } else write({ schemaVersion: 1, phase: 'unknown', connection, quota, voice, recentThreads, updatedAtMs: Date.now() });
+        write({ schemaVersion: 1, ...snapshot, connection, toolHealth, quota, voice, conversationCost:cost, recentThreads, historyLoading: !data.caughtUp, readErrors: data.errors });
+      } else { pauseTiming(); write({ schemaVersion: 1, threadId: id, phase: 'unknown', connection: { ...connection, message: '未找到这个任务的本地记录' }, quota, voice, conversationCost:cost, recentThreads, updatedAtMs: Date.now() }); }
+    } else write({ schemaVersion: 1, phase: 'unknown', connection, quota, voice, conversationCost:conversationCost.sample(null,[],weekly.pricing.catalog), recentThreads, updatedAtMs: Date.now() });
   } catch (e) { pauseTiming(true); write({ schemaVersion: 1, phase: 'unknown', error: String(e.message).slice(0, 180), connection: { cdp: 'waiting', selection: 'none', message: '采集暂不可用，正在重连' }, updatedAtMs: Date.now() }); }
   if (args.includes('--once')) break;
   await new Promise(r => setTimeout(r, Math.max(100, 900 - (Date.now() - start))));
 }
-voiceUsage.close(); desktop.close(); catalog.close(); rl.close(); await weekly.close();
+voiceUsage.close(); desktop.close(); catalog.close(); rl.close(); await conversationCost.close(); await weekly.close();

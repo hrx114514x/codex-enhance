@@ -27,6 +27,7 @@ public partial class MainWindow
     }
     private void UpdateQuotaSummary()
     {
+        UpdateConversationCostSummary();
         var q = snapshot["quota"];
         var week = (q?["windows"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(w => N(w["minutes"]) == 10080);
         var shortWindow = (q?["windows"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(w => N(w["minutes"]) == 300);
@@ -46,6 +47,7 @@ public partial class MainWindow
     private void OpenQuota(object sender, RoutedEventArgs e)
     {
         var stack = DetailStack();
+        var updateConversation = AddConversationCost(stack);
         var top = new DockPanel();
         var refresh = new Button { Content = "刷新", FontSize = 11, Padding = new Thickness(9,4,9,4), Foreground = BrushFor("Muted") };
         DockPanel.SetDock(refresh, Dock.Right); top.Children.Add(refresh);
@@ -61,7 +63,7 @@ public partial class MainWindow
             var text = Text(label,"Text",12); text.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(text);
             var toggle = new ToggleButton { Style = (Style)FindResource("QuotaSwitch"), IsChecked = value, ToolTip = hint };
             AutomationProperties.SetName(toggle,label); Grid.SetColumn(toggle,1); row.Children.Add(toggle); stack.Children.Add(row);
-            toggle.Click += (_,_) => { changed(toggle.IsChecked == true); Save(); SendQuotaOptions(); refreshDetail?.Invoke(); };
+            toggle.Click += (_,_) => { changed(toggle.IsChecked == true); Save(); SendQuotaOptions(); UpdateConversationCostSummary(); refreshDetail?.Invoke(); };
         }
         Switch("计入 Astra 长上下文加价", "仅调整等效估算。超过 272K 输入时，输入/缓存 ×2、输出 ×1.5；Codex Astra 默认不计入。", settings.QuotaIncludeAstraLongContext, v => settings.QuotaIncludeAstraLongContext=v);
         Switch("计入已记录的 Fast 倍率", "只换算有 Fast 记录的用量；未记录速度的请求按普通速度估算。此开关不会开启 Codex 的 Fast 模式。", settings.QuotaNormalizeFast, v => settings.QuotaNormalizeFast=v);
@@ -75,10 +77,11 @@ public partial class MainWindow
         disclosure.Click += (_,_) => { detailsOpen=!detailsOpen; details.Visibility=detailsOpen?Visibility.Visible:Visibility.Collapsed; disclosure.Content=detailsOpen?"计算明细  ⌄":"计算明细  ›"; AutomationProperties.SetName(disclosure,detailsOpen?"收起计算明细":"展开计算明细"); refreshDetail?.Invoke(); };
         DateTimeOffset queuedUntil = DateTimeOffset.MinValue;
         refresh.Click += (_,_) => { if (!preview && collector?.IsRunning != true) StartCollector(); Send("refreshQuota"); queuedUntil=DateTimeOffset.UtcNow.AddSeconds(4); };
-        var dialog = Detail("Codex · 账号额度", new ScrollViewer { Content=stack, VerticalScrollBarVisibility=ScrollBarVisibility.Auto, HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled });
+        var dialog = Detail("Codex · 费用与额度", new ScrollViewer { Content=stack, VerticalScrollBarVisibility=ScrollBarVisibility.Auto, HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled });
         string key = ""; var tickers = new List<Action>();
         refreshDetail = () =>
         {
+            updateConversation();
             var q = snapshot["quota"]; bool ready=S(q?["state"])=="ready", indexing=B(q?["indexing"]);
             subtitle.Text = S(q?["plan"]) switch { "pro"=>"Pro · 周额度", "plus"=>"Plus · 5 小时 / 周额度", ""=>"账号额度", _=>S(q?["plan"])+" · 账号额度" };
             if (preview) subtitle.Text += " · 示例数据";
@@ -138,7 +141,7 @@ public partial class MainWindow
             }
             var area=System.Windows.Forms.Screen.FromHandle(handle).WorkingArea;
             double scale=Math.Max(1,Native.GetDpiForWindow(handle)/96d);
-            dialog.Height=Math.Min((q?["windows"] as JsonArray)?.Count>1||detailsOpen?682:482,area.Height/scale-16);
+            dialog.Height=Math.Min(742,area.Height/scale-16);
             dialog.Top=Math.Clamp(dialog.Top,area.Top/scale+12,Math.Max(area.Top/scale+12,area.Bottom/scale-dialog.Height-12));
             foreach(var tick in tickers) tick();
         };

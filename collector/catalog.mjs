@@ -87,7 +87,7 @@ export class Catalog {
       this.logCursor.delete(old);
       for (const key of this.tails.keys()) if (key.startsWith(`${old}:`)) this.tails.delete(key);
     }
-    return { state, caughtUp, errors };
+    return { state, caughtUp, errors, files };
   }
   readCompaction(id, state) {
     try {
