@@ -10,8 +10,10 @@ import { PricingUpdates } from './pricing-updates.mjs';
 export async function readAccountQuota() {
   const store = globalThis.__codexEnhanceReadCache?.store;
   if (typeof store?.sendRequest !== 'function') return null;
-  const limits = await store.sendRequest('account/rateLimits/read', {}, { priority: 'background', timeoutMs: 2500 });
-  const auth = await store.sendRequest('account/read', { refreshToken: false }, { priority: 'background', timeoutMs: 2500 });
+  const [limits,auth] = await Promise.all([
+    store.sendRequest('account/rateLimits/read', {}, { priority: 'background', timeoutMs: 8000 }),
+    store.sendRequest('account/read', { refreshToken: false }, { priority: 'background', timeoutMs: 8000 })
+  ]);
   const bucket = limits.rateLimitsByLimitId?.codex ?? (limits.rateLimits?.limitId == null || limits.rateLimits?.limitId === 'codex' ? limits.rateLimits : null);
   return { accountId: typeof limits.accountId === 'string' ? limits.accountId : null, authType: auth.account?.type ?? null,
     plan: bucket?.planType ?? auth.account?.planType ?? null,
@@ -48,7 +50,8 @@ export function equivalentWindow(window, usage, ready, options) {
     estimateReasons: reasons, confidence: total == null ? 'insufficient' : usage.unattributedRequests || usage.assumedTierRequests ? 'low' : 'local_estimate' };
 }
 export class WeeklyQuota {
-  constructor(home, stateDir, {pricingUpdates} = {}) {
+  constructor(home, stateDir, {pricingUpdates,now=Date.now,workerFactory} = {}) {
+    this.now=now;this.workerFactory=workerFactory;this.displayPair=null;
     this.options = quotaOptions();
     this.home = home; this.stateDir = stateDir; this.view = { state: 'checking', windows: [] }; this.nextAt = 0; this.pending = null; this.revision = 0; this.session = null; this.worker = null; this.queryId = 0;
     fs.mkdirSync(stateDir, { recursive: true }); const file = path.join(stateDir, 'usage-salt');
@@ -58,15 +61,16 @@ export class WeeklyQuota {
     this.observationFile = path.join(stateDir, 'quota-observation.json');
     try { const saved = JSON.parse(fs.readFileSync(this.observationFile, 'utf8')); if (Array.isArray(saved.windows) && /^[a-f0-9]{64}$/.test(saved.accountKey ?? '')) this.rawQuota = saved; } catch {}
   }
-  refresh() { this.nextAt = Math.min(this.nextAt, Date.now() + 2500); this.pricing.refresh(); }
+  refresh() { this.nextAt = 0; this.pricing.refresh(); }
   setOptions(options) { this.options = quotaOptions(options); }
   ensureWorker() {
     if (this.worker) return;
-    this.worker = new Worker(new URL('./weekly-worker.mjs', import.meta.url), { workerData: { home: this.home, stateDir: this.stateDir, salt: this.salt } });
+    this.worker = this.workerFactory?.() ?? new Worker(new URL('./weekly-worker.mjs', import.meta.url), { workerData: { home: this.home, stateDir: this.stateDir, salt: this.salt } });
     this.worker.on('message', data => {
       if (data.queryId !== this.queryId || this.rawQuota?.accountKey !== data.accountKey) return;
       this.aggregate = data;
       if (data.complete) {
+        this.displayPair={quota:this.rawQuota,aggregate:data};
         this.history.record(this.rawQuota,data);
         this.pricing.observeMissing(data.windows?.flatMap(w=>w.models??[])??[]);
       }
@@ -74,7 +78,7 @@ export class WeeklyQuota {
     this.worker.on('error', () => { this.aggregate = { error: true }; this.worker = null; });
   }
   sample(session) {
-    const now = Date.now();
+    const now = this.now();
     const pricing=this.pricing.sample();
     if(this.pricingRevision!==this.pricing.catalog.revision) {
       this.pricingRevision=this.pricing.catalog.revision;
@@ -83,35 +87,43 @@ export class WeeklyQuota {
       this.aggregate=null;
       if(this.view.state==='ready'&&this.rawQuota?.windows?.length) this.queryUsage(this.rawQuota);
     }
-    if (session !== this.session) { this.session = session; this.revision++; this.pending = null; this.nextAt = 0; this.view = { state: 'checking', windows: [] }; }
+    if (session !== this.session) { this.session = session; this.revision++; this.pending = null; this.nextAt = 0; this.displayPair=null; this.view = { state: 'checking', windows: [] }; }
     if (!session) return { state: 'unavailable', reason: 'client_disconnected', windows: [] };
     if (!this.pending && now >= this.nextAt) {
       const revision = this.revision; this.nextAt = now + 60000;
-      this.pending = session.evaluate(`(${readAccountQuota.toString()})()`, 7000).then(raw => {
+      this.pending = session.evaluate(`(${readAccountQuota.toString()})()`, 10000).then(raw => {
         if (revision !== this.revision) return;
-        const quota = normalizeQuota(raw, this.salt);
+        const quota = normalizeQuota(raw, this.salt,this.now());
         const previous = this.rawQuota;
         if (previous?.accountKey === quota.accountKey) for (const w of quota.windows) {
           const old = previous.windows.find(p => p.minutes === w.minutes && p.resetsAt === w.resetsAt);
           if (old && (old.resetDetected || w.usedPercent < old.usedPercent - 1)) w.resetDetected = true;
         }
         this.rawQuota = quota; this.view = quota; this.aggregate = null;
+        if(quota.state!=='ready')this.nextAt=this.now()+15000;
         if (quota.state === 'ready') {
           try { const temp = this.observationFile + `.${process.pid}.tmp`; fs.writeFileSync(temp, JSON.stringify(quota)); fs.renameSync(temp, this.observationFile); } catch {}
         }
         if (quota.state === 'ready' && quota.windows.length) {
           this.queryUsage(quota);
         }
-      }).catch(() => { if (revision === this.revision) this.view = { state: 'unavailable', reason: 'quota_unavailable', windows: [] }; })
+      }).catch(() => { if (revision === this.revision) { this.view = { state: 'unavailable', reason: 'quota_unavailable', windows: [] }; this.nextAt=this.now()+15000; } })
         .finally(() => { if (revision === this.revision) this.pending = null; });
     }
-    const quota = this.view;
-    if (quota.state !== 'ready') return { ...quota, checking: !!this.pending, pricing };
+    let quota = this.view;
+    if (quota.state !== 'ready') return { ...quota, checking: !!this.pending, nextRefreshAtMs:this.nextAt, pricing };
     if (now - quota.checkedAtMs > 180000 || quota.windows.some(w => w.resetsAtMs <= now)) return { state: 'unavailable', reason: 'stale', windows: [] };
-    const a = this.aggregate;
-    return { state: 'ready', plan: quota.plan, checkedAtMs: quota.checkedAtMs, indexing: !a?.complete, indexProgress: a?.progress ?? 0, checking: !!this.pending,
+    let a = this.aggregate;
+    const pair=this.displayPair;
+    // Render only matched percentage/usage samples. Keep the previous pair
+    // during a refresh so the money does not flash blank or use a new divisor.
+    const retaining=!a?.complete&&!!quota.accountKey&&pair?.quota.accountKey===quota.accountKey
+      &&now-pair.quota.checkedAtMs<=180000&&pair.quota.windows.length===quota.windows.length
+      &&pair.quota.windows.every(w=>w.resetsAtMs>now&&quota.windows.some(next=>next.minutes===w.minutes&&next.resetsAt===w.resetsAt));
+    if(retaining){quota=pair.quota;a=pair.aggregate;}
+    return { state: 'ready', plan: quota.plan, checkedAtMs: quota.checkedAtMs, indexing: !a?.complete, indexProgress: this.aggregate?.progress ?? 0, checking: !!this.pending, refreshingUsage:retaining,
       windows: quota.windows.map(w => equivalentWindow(w, a?.windows?.find(x => x.minutes === w.minutes) ?? { usd: null, requests: 0, tokens: 0, unpricedRequests: 0, parseErrors: a?.error ? 1 : 0 }, !!a?.complete, this.options)),
-      options: this.options, pricingDate: a?.pricingDate??this.pricing.catalog.verifiedAt, pricing, scope: 'local_openai', indexError: !!a?.error,
+      options: this.options, pricingDate: a?.pricingDate??this.pricing.catalog.verifiedAt, pricing, scope: 'local_openai', indexError: !!this.aggregate?.error,
       history: this.history.view(quota.accountKey,equivalentWindow,this.options,now) };
   }
   queryUsage(quota) {

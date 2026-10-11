@@ -85,29 +85,44 @@ export function readRuntimeStore(threadId) {
   const cacheKey = '__codexEnhanceReadCache';
   const cache = globalThis[cacheKey] ??= { store: null, lastProbe: 0 };
   let store = cache.store;
-  const containsThread = candidate => candidate?.conversations instanceof Map && [...candidate.conversations.keys()].some(key => String(key) === threadId || String(key).endsWith(`:${threadId}`));
-  if (store && !containsThread(store)) { store = null; cache.store = null; }
+  const usableStore = candidate => candidate?.conversations instanceof Map && candidate.disposed !== true
+    && (candidate.hostId == null || candidate.hostId === 'local');
+  const containsThread = candidate => usableStore(candidate) && (candidate.conversations.has(threadId)
+    || candidate.conversations.has(`local:${threadId}`) || [...candidate.conversations.keys()].some(key => String(key).endsWith(`:${threadId}`)));
+  // Keep the account-capable manager while a newly selected thread hydrates.
+  if (store && !usableStore(store)) { store = null; cache.store = null; }
   if (!store && Date.now() - cache.lastProbe > 8000) {
     cache.lastProbe = Date.now();
     const root = globalThis.__codexRoot?._internalRoot?.current;
     // State providers and hooks are direct owners. Walking their values avoids
     // traversing hundreds of thousands of unrelated DOM/React element objects.
-    const fibers = root ? [root] : [], visitedFibers = new WeakSet(), seeds = [];
+    const fibers = root ? [root] : [], visitedFibers = new WeakSet(), seeds = [], seedSet = new WeakSet();
+    const seed = value => {
+      if (store) return;
+      if (!value || typeof value !== 'object' || seedSet.has(value)) return;
+      seedSet.add(value); seeds.push(value);
+      if (containsThread(value)) { store = value; return; }
+      // New clients keep host managers inside hook arrays. Inspect small
+      // containers immediately, before unrelated React state fills the queue.
+      const values = Array.isArray(value) && value.length <= 64 ? value
+        : value instanceof Map && value.size <= 64 ? value.values()
+        : value instanceof Set && value.size <= 64 ? value.values() : [];
+      for (const child of values) if (containsThread(child)) { store = child; return; }
+    };
     const fiberDeadline = performance.now() + 18;
-    for (let index = 0; index < fibers.length && index < 30000 && performance.now() < fiberDeadline; index++) {
+    for (let index = 0; !store && index < fibers.length && index < 30000 && performance.now() < fiberDeadline; index++) {
       const fiber = fibers[index];
       if (!fiber || typeof fiber !== 'object' || visitedFibers.has(fiber)) continue;
       visitedFibers.add(fiber);
       if (fiber.child) fibers.push(fiber.child);
       if (fiber.sibling) fibers.push(fiber.sibling);
       let dependency = fiber.dependencies?.firstContext;
-      for (let n = 0; dependency && n < 30; n++, dependency = dependency.next) if (dependency.memoizedValue && typeof dependency.memoizedValue === 'object') seeds.push(dependency.memoizedValue);
-      if (fiber.memoizedProps?.value) seeds.push(fiber.memoizedProps.value);
+      for (let n = 0; !store && dependency && n < 30; n++, dependency = dependency.next) seed(dependency.memoizedValue);
+      seed(fiber.memoizedProps?.value);
       let hook = fiber.memoizedState;
-      for (let n = 0; hook && n < 30 && Object.hasOwn(hook, 'memoizedState'); n++, hook = hook.next)
-        if (hook.memoizedState && typeof hook.memoizedState === 'object') seeds.push(hook.memoizedState);
+      for (let n = 0; !store && hook && n < 30 && Object.hasOwn(hook, 'memoizedState'); n++, hook = hook.next) seed(hook.memoizedState);
     }
-    store = seeds.find(containsThread) ?? null;
+    store ??= seeds.find(containsThread) ?? null;
     if (store) cache.store = store;
     const queue = store ? [] : [...new Set([...seeds, ...(root ? [root] : [])])], seen = new WeakSet();
     const deadline = performance.now() + 20;

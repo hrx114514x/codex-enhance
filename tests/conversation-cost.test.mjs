@@ -76,3 +76,24 @@ test('real worker returns numeric totals without log contents',async t=>{
   for(let i=0;i<100;i++){view=cost.sample(thread,[a],pricing);if(view.state==='ready')break;await new Promise(resolve=>setTimeout(resolve,20));}
   assert.equal(view.state,'ready');assert.equal(view.requests,1);assert.equal(JSON.stringify(view).includes('PRIVATE TEXT'),false);assert.equal(JSON.stringify(view).includes(a),false);
 });
+
+test('today and turn costs are subsets of deduplicated totals and use the same pricing switches',async t=>{
+  const dir=fixture(t),file=path.join(dir,'cost.jsonl');
+  const yesterday={...ledger('yesterday'),timestamp:new Date(at-86400000).toISOString()};
+  write(file,[meta(),context('previous'),{...yesterday,payload:{...yesterday.payload,turn_id:'previous'}},ledger('today-previous',{turn_id:'previous'}),context(),counter(),ledger('current')]);
+  const usage=new ConversationUsage(thread,'salt');await usage.scan([file]);
+  const totals=usage.totals(pricing,at,{turnId:'turn',dayStartMs:at-3600000});assert.equal(totals.requests,3);assert.equal(totals.today.requests,2);assert.equal(totals.turn.requests,1);
+  for(const astra of [true,false])for(const fast of [true,false]){
+    const view=conversationCostView(totals,{includeAstraLongContext:astra,normalizeFast:fast});
+    assert.ok(Math.abs(view.estimatedUsd-view.turn.estimatedUsd*3)<1e-9);assert.ok(Math.abs(view.today.estimatedUsd-view.turn.estimatedUsd*2)<1e-9);
+  }
+  assert.equal(usage.totals(pricing,at,{turnId:'new',dayStartMs:at+1}).turn.requests,0);
+});
+test('manual snapshots never attach a previous turn or previous day subtotal to the new scope',async t=>{
+  const dir=fixture(t),worker=new WorkerFake();let now=at;const cost=new ConversationCost(dir,{salt:'salt',now:()=>now,workerFactory:()=>worker});t.after(()=>cost.close());
+  cost.sample('a',[],pricing,{turnId:'one'});worker.reply(0,{turn:{state:'ready',requests:1,quotaBaseUsd:2},today:{state:'ready',requests:1,quotaBaseUsd:2}});cost.setAutomatic(false);
+  assert.equal(cost.sample('a',[],pricing,{turnId:'one'}).turn.estimatedUsd,2);
+  const switched=cost.sample('a',[],pricing,{turnId:'two'});assert.equal(switched.turn,null);assert.equal(switched.estimatedUsd,6);assert.equal(worker.sent.length,1);
+  now+=86400000;assert.equal(cost.sample('a',[],pricing,{turnId:'two'}).today,null);
+  cost.setAutomatic(true);cost.sample('a',[],pricing,{turnId:'two'});assert.equal(worker.sent.length,2);assert.equal(worker.sent[1].turnId,'two');
+});

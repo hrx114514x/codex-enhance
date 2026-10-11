@@ -87,10 +87,11 @@ public partial class MainWindow
             if (preview) subtitle.Text += " · 示例数据";
             subtitle.ToolTip=preview?"界面预览 · 示例数据":"更新于 "+LocalTime(N(q?["checkedAtMs"]));
             bool queued=DateTimeOffset.UtcNow<queuedUntil;
-            refresh.Content=B(q?["checking"])?"刷新中…":queued?"已请求":"刷新";
-            refresh.IsEnabled=!B(q?["checking"])&&!queued&&!preview;
-            status.Text = ready ? (q?["windows"] as JsonArray)?.Count==0?"暂无可用额度数据":indexing?B(q?["indexError"])?"统计暂不可用，可稍后刷新":$"正在整理用量 · {100*(N(q?["indexProgress"])??0):0}%":""
-                : S(q?["reason"]) switch { "not_subscription"=>"当前未使用订阅账号", "stale"=>"额度已过期，等待刷新", "client_disconnected"=>"等待连接 Codex", _=>"正在读取额度…" };
+            bool updating=B(q?["checking"])||B(q?["refreshingUsage"])&&!B(q?["indexError"]);
+            refresh.Content=updating?"刷新中…":queued?"已请求":"刷新";
+            refresh.IsEnabled=!updating&&!queued&&!preview;
+            status.Text = ready ? (q?["windows"] as JsonArray)?.Count==0?"暂无可用额度数据":B(q?["refreshingUsage"])?B(q?["indexError"])?"更新失败，保留上次完整采样；可点击重试":"正在更新统计 · 显示上次完整采样":indexing?B(q?["indexError"])?"统计暂不可用，可稍后刷新":$"正在整理用量 · {100*(N(q?["indexProgress"])??0):0}%":""
+                : S(q?["reason"]) switch { "not_subscription"=>"当前未使用订阅账号", "stale"=>"额度已过期，等待刷新", "client_disconnected"=>"等待连接 Codex", _=>B(q?["checking"])||S(q?["state"])=="checking"?"正在读取额度…":"额度暂时读取失败，将自动重试；也可点击刷新。" };
             status.Visibility=status.Text.Length==0?Visibility.Collapsed:Visibility.Visible;
             string next=(q?["windows"]?.ToJsonString()??"[]")+ready+indexing+settings.QuotaIncludeAstraLongContext+settings.QuotaNormalizeFast;
             if (next!=key)

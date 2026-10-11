@@ -8,6 +8,7 @@ export function conversationCostView(data,options) {
   const amount=quotaAmount(data,options).ordinaryQuotaUsd;
   const partial=data.unpricedRequests>0||data.parseErrors>0||data.readErrors>0||data.unsupportedFiles>0||quotaOptions(options).normalizeFast&&data.unnormalizedRequests>0;
   return {...data,estimatedUsd:data.state==='ready'&&!(data.requests>0&&data.requests===data.unpricedRequests)?amount:null,partial,
+    ...(data.today?{today:conversationCostView(data.today,options)}:{}),...(data.turn?{turn:conversationCostView(data.turn,options)}:{}),
     models:(data.models??[]).map(model=>({...model,estimatedUsd:quotaAmount(model,options).ordinaryQuotaUsd}))};
 }
 export class ConversationCost {
@@ -22,7 +23,7 @@ export class ConversationCost {
       if(this.worker!==worker||message.queryId!==this.pending?.queryId||message.threadId!==this.currentId)return;
       if(message.error){this.pending=null;this.error='refresh_failed';return;}
       if(!message.complete){this.progress=message.progress;return;}
-      this.pending=null;this.error=null;this.cache.delete(message.threadId);this.cache.set(message.threadId,message);
+      this.pending=null;this.progress=1;this.error=null;this.cache.delete(message.threadId);this.cache.set(message.threadId,message);
       while(this.cache.size>8)this.cache.delete(this.cache.keys().next().value);
       this.onMissing(message.models??[]);
     });
@@ -36,18 +37,19 @@ export class ConversationCost {
     else {this.pending=null;this.force=false;this.sequence++;}
   }
   refresh(threadId) {if(!threadId||threadId===this.currentId){this.force=true;this.nextAt=0;}}
-  sample(threadId,files,pricing) {
+  sample(threadId,files,pricing,{turnId=null}={}) {
     const now=this.now();
+    const day=new Date(now);day.setHours(0,0,0,0);const dayStartMs=day.getTime();
     if(threadId!==this.currentId){this.currentId=threadId;this.pending=null;this.sequence++;this.nextAt=0;this.force=true;this.error=null;}
     const control={automatic:this.automatic,intervalMs:CONVERSATION_REFRESH_MS};
     if(!threadId)return {state:'unavailable',reason:'no_thread',estimatedUsd:null,...control};
     const data=this.cache.get(threadId);
-    const changed=!!data&&data.pricingRevision!==pricing.revision;
+    const changed=!!data&&(data.pricingRevision!==pricing.revision||data.turnId!==turnId||data.dayStartMs!==dayStartMs);
     if(!this.pending&&(this.force||this.automatic&&(now>=this.nextAt||changed))) {
       this.ensureWorker();const queryId=++this.sequence;this.pending={queryId,threadId};this.progress=0;this.force=false;this.error=null;this.nextAt=now+CONVERSATION_REFRESH_MS;
-      this.worker.postMessage({type:'query',queryId,threadId,files:files??[],cutoff:now,pricing});
+      this.worker.postMessage({type:'query',queryId,threadId,files:files??[],cutoff:now,pricing,turnId,dayStartMs});
     }
-    return {...conversationCostView(data,this.options),...control,threadId,refreshing:!!this.pending,progress:this.progress??0,error:this.error,
+    return {...conversationCostView(data,this.options),...(data?.turnId!==turnId?{turn:null}:{}),...(data?.dayStartMs!==dayStartMs?{today:null}:{}),...control,threadId,refreshing:!!this.pending,progress:this.progress??0,error:this.error,
       options:this.options,nextRefreshAtMs:this.automatic?this.nextAt:null};
   }
   async close(){this.pending=null;const worker=this.worker;this.worker=null;await worker?.terminate();}

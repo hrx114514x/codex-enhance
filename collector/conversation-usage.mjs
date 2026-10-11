@@ -70,9 +70,12 @@ export class ConversationUsage {
     }
     this.readErrors=readErrors;this.fileCount=files.length;return true;
   }
-  totals(pricing,cutoff) {
+  totals(pricing,cutoff,{turnId=null,dayStartMs=null}={}) {
     const out={requests:0,tokens:0,input:0,cached:0,output:0,usd:0,unpricedRequests:0,fastRequests:0,assumedTierRequests:0,unnormalizedRequests:0,
       quotaBaseUsd:0,astraPremiumUsd:0,quotaFastPremiumUsd:0,astraFastPremiumUsd:0,parseErrors:0,readErrors:this.readErrors??0,fromAtMs:null,toAtMs:null,models:[]};
+    const scope=()=>({state:'ready',requests:0,tokens:0,input:0,cached:0,output:0,unpricedRequests:0,unnormalizedRequests:0,quotaBaseUsd:0,astraPremiumUsd:0,quotaFastPremiumUsd:0,astraFastPremiumUsd:0});
+    const today=Number.isFinite(dayStartMs)?scope():null,turn=turnId?scope():null;
+    const turnScope=turnId?keyed(this.salt,`${this.threadKey}:${keyed(this.salt,turnId)}`):null;
     const models=new Map();let ownFiles=0,unsupportedFiles=0;
     for(const source of this.files.values()) {
       const meta=source.parser.state.meta;
@@ -92,11 +95,18 @@ export class ConversationUsage {
         if(price.fast)out.fastRequests++;if(price.assumedTier)out.assumedTierRequests++;if(price.ordinaryQuotaUsd===null)out.unnormalizedRequests++;
       }
       models.set(record.model,model);
+      for(const summary of [record.at>=dayStartMs?today:null,record.scopeKey===turnScope?turn:null].filter(Boolean)) {
+        summary.requests++;summary.input+=record.input;summary.cached+=record.cached??0;summary.output+=record.output;summary.tokens+=record.input+record.output;
+        if(!price)summary.unpricedRequests++;
+        else {for(const field of priceFields)summary[field]+=price[field]??0;if(price.ordinaryQuotaUsd===null)summary.unnormalizedRequests++;}
+      }
     }
     out.models=[...models.values()].sort((a,b)=>b.quotaBaseUsd-a.quotaBaseUsd).slice(0,32);
     out.unsupportedFiles=unsupportedFiles;
     out.state=!this.fileCount||!ownFiles?'unavailable':'ready';out.reason=!this.fileCount||!ownFiles?'no_records':unsupportedFiles===ownFiles?'unsupported_provider':null;
     if(out.reason==='unsupported_provider')out.state='unavailable';
+    for(const summary of [today,turn].filter(Boolean))Object.assign(summary,{state:out.state,parseErrors:out.parseErrors,readErrors:out.readErrors,unsupportedFiles});
+    out.today=today;out.turn=turn;out.turnId=turnId;out.dayStartMs=dayStartMs;
     return out;
   }
 }

@@ -19,7 +19,7 @@ async function pump() {
         parentPort.postMessage({queryId:query.queryId,threadId:query.threadId,complete:false,progress:value});
       }});
       if(!complete)continue;
-      parentPort.postMessage({queryId:query.queryId,threadId:query.threadId,complete:true,...usage.totals(pricing,query.cutoff),
+      parentPort.postMessage({queryId:query.queryId,threadId:query.threadId,complete:true,...usage.totals(pricing,query.cutoff,query),
         sampledAtMs:query.cutoff,pricingDate:pricing.verifiedAt,pricingRevision:pricing.revision});
     } catch {parentPort.postMessage({queryId:query.queryId,threadId:query.threadId,error:true});}
   }} finally {running=false;}
