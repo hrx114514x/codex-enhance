@@ -45,6 +45,18 @@ public partial class MainWindow
         checks["longTitleBounded"]=TaskTitle.ActualWidth<=233&&Card.ActualWidth<=355; // One DIP for device-pixel layout rounding.
         ExpandedScroll.MaxHeight=360;UpdateLayout();checks["smallScreenScrolls"]=ExpandedScroll.ScrollableHeight>0;ExpandedScroll.ScrollToEnd();UpdateLayout();
         CaptureScene(Path.Combine(directory,"small-screen-scroll.png"));ExpandedScroll.ScrollToHome();
+        bool Hits(UIElement target)
+        {
+            var element=(FrameworkElement)target;
+            var point=element.TranslatePoint(new Point(element.ActualWidth/2,element.ActualHeight/2),this);
+            var hit=InputHitTest(point) as DependencyObject;
+            while(hit is not null){if(ReferenceEquals(hit,target))return true;hit=hit is Visual?VisualTreeHelper.GetParent(hit):LogicalTreeHelper.GetParent(hit);}
+            return false;
+        }
+        disclosure.SetExpanded(false);UpdateDisclosure();UpdateLayout();
+        checks["collapsedReceivesMouse"]=Hits(Pill);
+        disclosure.SetExpanded(true);UpdateDisclosure();UpdateLayout();
+        checks["expandedReceivesMouse"]=Hits(ConversationCostButton);
         foreach(bool light in new[]{true,false}){var p=DesignTokens.Palette(light);checks[light?"lightContrast":"darkContrast"]=DesignTokens.Contrast(p["Text"],p["Panel"])>=4.5&&DesignTokens.Contrast(p["Muted"],p["Surface"])>=4.5;}
         settings.CustomLightColors=oldLight;settings.CustomDarkColors=oldDark;settings.Theme=oldTheme;ApplyTheme(true);ApplySnapshot(source);
         File.WriteAllText(Path.Combine(directory,"design-check.json"),JsonSerializer.Serialize(new {checks,passed=checks.Values.All(x=>x)},Settings.JsonOptions));

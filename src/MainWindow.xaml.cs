@@ -261,6 +261,7 @@ public partial class MainWindow : Window
     private void UpdateDisclosure()
     {
         ExpandedContent.Visibility = disclosure.Expanded ? Visibility.Visible : Visibility.Collapsed;
+        ExpandedScroll.Visibility = ExpandedContent.Visibility;
         Pill.Visibility = disclosure.Expanded ? Visibility.Collapsed : Visibility.Visible;
         ToolsDetails.Visibility = disclosure.ToolsExpanded ? Visibility.Visible : Visibility.Collapsed;
         ToolsChevron.Content = Icons.Create(disclosure.ToolsExpanded ? "chevron-down" : "chevron-right", 16);
