@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { JsonlTail } from './tail.mjs';
 import { ThreadState } from './state.mjs';
 import {observeModelLog} from './models.mjs';
+import {observeNetworkLog} from './network.mjs';
 
 // Filter before LIMIT so a burst of worker threads cannot displace user conversations.
 const userThreads = `CASE WHEN json_valid(source) THEN json_type(source, '$.subagent') IS NULL
@@ -98,6 +99,7 @@ export class Catalog {
       for (const row of rows) {
         this.logCursor.set(id, Math.max(this.logCursor.get(id) ?? 0, row.id));
         observeModelLog(state,row);
+        observeNetworkLog(state,row);
         if(turn.completedAtMs)continue;
         if (/op: Compact|response\.compaction\.compacting|session_task\.compact/.test(row.feedback_log_body)) { turn.phase = 'compacting'; turn.wasCompaction = true; turn.compactionStartedAtMs ??= row.ts * 1000; }
         if (/response\.compaction\.compacting/.test(row.feedback_log_body)) turn.compactionHeartbeatAtMs = row.ts * 1000;

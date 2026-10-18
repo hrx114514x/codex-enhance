@@ -19,6 +19,7 @@ public partial class MainWindow
         FreshnessText.Text = preview ? "预览" : stale ? "更新延迟" : B(snapshot["historyLoading"]) ? "读取中" : connected && B(snapshot["connection"]?["runtime"]) ? "已连接" : connected ? "本地记录" : "未连接";
         FreshnessText.ToolTip = preview ? "示例数据" : $"{Math.Floor(age / 1000):0} 秒前更新";
         UpdateActivity(stale);
+        if(stale) { NetworkSummary.Text="采集已过期";NetworkSummary.Foreground=BrushFor("Faint");NetworkCaption.Text="等待新的网络与响应记录"; }
         if (stale) { PhaseText.Text = "状态待更新"; PillPhase.Text = "状态待更新"; PhaseDot.Fill = PillDot.Fill = BrushFor("Faint"); }
     }
 
@@ -138,7 +139,7 @@ public partial class MainWindow
         var link = MetricRow(stack, "Codex 连接"); var runtime = MetricRow(stack, "实时状态"); var age = MetricRow(stack, "距采集更新");
         var history = MetricRow(stack, "历史读取"); var errors = MetricRow(stack, "读取错误");
         Section(stack, "显示与跟随");
-        MetricRow(stack, "显示方式")("附着 Codex · 随窗口遮挡和最小化");
+        MetricRow(stack, "显示方式")("独立浮窗 · 跟随位置和最小化");
         var selection = MetricRow(stack, "观察对象");
         Note(stack, "浮窗随 Codex 窗口显示。“跟随对话”开启时，观察对象随页面切换。");
         Section(stack, "本地诊断");

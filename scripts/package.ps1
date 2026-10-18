@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([string]$SourceCommit)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $version = (Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json).version
@@ -17,7 +17,8 @@ foreach ($name in @('start-codex.ps1', 'install-user.ps1')) {
     [IO.File]::WriteAllText((Join-Path $appRoot ('scripts\' + $name)), [IO.File]::ReadAllText((Join-Path $PSScriptRoot $name)), $utf8Bom)
 }
 Get-ChildItem -LiteralPath (Join-Path $projectRoot 'packaging') -File | Copy-Item -Destination $appRoot
-$manifest = [ordered]@{ product = 'Codex Enhance'; version = $version; architecture = 'win-x64'; node = (& (Join-Path $appRoot 'runtime\node.exe') --version); builtAtUtc = [DateTimeOffset]::UtcNow.ToString('o') }
+if ($SourceCommit -and $SourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'SourceCommit must be a full Git commit SHA.' }
+$manifest = [ordered]@{ product = 'Codex Enhance'; version = $version; architecture = 'win-x64'; sourceCommit = $SourceCommit; node = (& (Join-Path $appRoot 'runtime\node.exe') --version); builtAtUtc = [DateTimeOffset]::UtcNow.ToString('o') }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $appRoot 'version.json') -Encoding UTF8
 $zip = Join-Path $releaseRoot ($packageName + '.zip')
 if (Test-Path -LiteralPath $zip) { throw 'Release archive already exists; retain it or move it aside before repackaging.' }

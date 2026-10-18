@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Controls;
@@ -47,6 +48,11 @@ public partial class MainWindow : Window
     private IntPtr lastForeground;
     private bool lastForegroundIsCodex;
     private DateTimeOffset lastHostSearch;
+    private UiHealth? uiHealth;
+    private sealed record PendingSnapshot(CollectorClient Source, JsonObject Data);
+    private PendingSnapshot? pendingSnapshot;
+    private int snapshotQueued;
+    private bool closing;
 
     public MainWindow(string[] arguments)
     {
@@ -67,12 +73,17 @@ public partial class MainWindow : Window
             var source = HwndSource.FromHwnd(handle); source?.AddHook(WindowMessage);
             long style = Native.GetWindowLongPtr(handle, -20).ToInt64();
             if (!preview) Native.SetWindowLongPtr(handle, -20, new IntPtr(style | 0x08000000L | 0x80L)); // NOACTIVATE + TOOLWINDOW
+            if (!preview) Native.MakeIndependent(handle);
         };
         Loaded += OnLoaded;
         SizeChanged += (_, _) => { if (!preview && IsVisible && host != IntPtr.Zero) PositionNearHost(); };
         MouseRightButtonUp += (_, e) => { OpenMenu(); e.Handled = true; };
         timer.Tick += (_, _) => Tick();
-        Closed += (_, _) => { timer.Stop(); collector?.Dispose(); tray?.Dispose(); detailWindow?.Close(); Application.Current.Shutdown(); };
+        Closed += async (_, _) => {
+            closing = true; timer.Stop(); uiHealth?.Dispose(); tray?.Dispose(); detailWindow?.Close();
+            if (collector is { } retired) await retired.StopAsync();
+            Application.Current.Shutdown();
+        };
     }
     private IntPtr WindowMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
@@ -115,21 +126,25 @@ public partial class MainWindow : Window
             }
 
         }
-        else StartCollector();
+        else { uiHealth = new UiHealth(); StartCollector(); }
         BuildTray(); timer.Start(); Tick();
     }
     private string? Arg(string flag) { int index = Array.IndexOf(args, flag); return index >= 0 && index + 1 < args.Length ? args[index + 1] : null; }
     private void StartCollector()
     {
+        uiHealth?.Enter("collector:start");
         collector?.Dispose();
-        collector = new CollectorClient();
-        collector.Snapshot += data => Dispatcher.BeginInvoke(() => { if (!preview) { lastSnapshotReceived = DateTimeOffset.UtcNow; collectorFailed = false; ApplySnapshot(data); } });
-        collector.Error += error => Dispatcher.BeginInvoke(() => {
+        var next = new CollectorClient(); collector = next;
+        next.Snapshot += data => {
+            if (closing || !ReferenceEquals(collector, next)) return;
+            Interlocked.Exchange(ref pendingSnapshot, new PendingSnapshot(next, data)); QueueSnapshot();
+        };
+        next.Error += error => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => {
+            if (closing || !ReferenceEquals(collector, next)) return;
             collectorFailed = true;
             ConnectionText.Text = error; ConnectionNotice.Visibility = Visibility.Visible;
-            Directory.CreateDirectory(Settings.StateDirectory);
-            File.AppendAllText(Path.Combine(Settings.StateDirectory, "collector-error.log"), DateTimeOffset.Now + " " + error + Environment.NewLine);
-        });
+            DiagnosticFiles.Write("collector-error.log", DateTimeOffset.Now + " " + error, append: true);
+        }));
         try
         {
             collector.Start(settings, Arg("--thread") ?? settings.LockedThreadId ?? settings.ManualThreadId);
@@ -138,6 +153,23 @@ public partial class MainWindow : Window
             else if (!settings.FollowMode && settings.ManualThreadId is not null) Send("select", settings.ManualThreadId);
         }
         catch (Exception e) { ConnectionText.Text = "采集未启动：" + e.Message; ConnectionNotice.Visibility = Visibility.Visible; }
+        finally { uiHealth?.Beat(); }
+    }
+    private void QueueSnapshot()
+    {
+        if (Interlocked.CompareExchange(ref snapshotQueued, 1, 0) != 0 || closing) return;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => {
+            var pending = Interlocked.Exchange(ref pendingSnapshot, null);
+            try {
+                if (!closing && pending is not null && ReferenceEquals(collector, pending.Source)) {
+                    uiHealth?.Enter("snapshot:render"); lastSnapshotReceived = DateTimeOffset.UtcNow;
+                    collectorFailed = false; ApplySnapshot(pending.Data);
+                }
+            } finally {
+                uiHealth?.Beat(); Interlocked.Exchange(ref snapshotQueued, 0);
+                if (!closing && Volatile.Read(ref pendingSnapshot) is not null) QueueSnapshot();
+            }
+        }));
     }
     private static string S(JsonNode? n, string fallback = "") => n is JsonValue v && v.TryGetValue<string>(out var value) ? value : fallback;
     private static double? N(JsonNode? n)
@@ -192,7 +224,7 @@ public partial class MainWindow : Window
             ToolsSummary.Text = $"目录变化 · {records} 项调用";
         ToolsSummary.Foreground = BrushFor(criticalCount > 0 ? "Critical" : "Muted");
         CapabilitySummary.Text = CapabilityLabel();
-        UpdateQuotaSummary();
+        UpdateQuotaSummary(); UpdateNetworkSummary();
         ToolsButton.ToolTip = attention + notes > 0 ? $"有 {attention + notes} 条分级记录，点击查看。只有 Critical 主动展开。" : realtime ? "当前回合的工具调用，点击查看详情" : "已完成调用来自本地记录；实时调用状态尚未接通";
         var connection = data["connection"];
         var selection = S(connection?["selection"]);
@@ -216,7 +248,7 @@ public partial class MainWindow : Window
         if (!preview && DateTimeOffset.UtcNow - lastDiagnostic > TimeSpan.FromSeconds(5))
         {
             lastDiagnostic = DateTimeOffset.UtcNow;
-            try { Directory.CreateDirectory(Settings.StateDirectory); File.WriteAllText(Path.Combine(Settings.StateDirectory, "latest-state.json"), data.ToJsonString(Settings.JsonOptions)); } catch { }
+            DiagnosticFiles.Write("latest-state.json", data.ToJsonString(Settings.JsonOptions));
         }
     }
     private void UpdateTime()
@@ -363,24 +395,28 @@ public partial class MainWindow : Window
     private void Tick()
     {
         if (preview) { refreshDetail?.Invoke(); return; }
+        uiHealth?.Enter("tick:host");
         var foreground = Native.GetForegroundWindow();
         Native.GetWindowThreadProcessId(foreground, out uint foregroundProcess);
         if (foreground != lastForeground) { lastForeground = foreground; lastForegroundIsCodex = Native.IsCodex(foreground); }
         if (lastForegroundIsCodex)
         {
             var candidate = Native.GetAncestor(foreground, 3); // Root owner: ignore native dialogs/tooltips.
-            if (candidate != IntPtr.Zero && candidate != host && Native.IsCodex(candidate))
-            { AttachHost(candidate); }
+            if (candidate != IntPtr.Zero && candidate != host && Native.IsHostWindow(candidate))
+            { FollowHost(candidate); }
         }
         if ((host == IntPtr.Zero || !Native.IsWindow(host)) && DateTimeOffset.UtcNow - lastHostSearch > TimeSpan.FromSeconds(5))
         {
             lastHostSearch = DateTimeOffset.UtcNow;
             var candidate = Native.FindSingleHost();
-            if (candidate != IntPtr.Zero) AttachHost(candidate);
+            if (candidate != IntPtr.Zero) FollowHost(candidate);
         }
-        bool show = !hiddenByUser && host != IntPtr.Zero && Native.IsWindow(host) && Native.IsWindowVisible(host) && !Native.IsIconic(host);
+        uiHealth?.Enter("tick:visibility");
+        bool show = Native.ShouldShowNearHost(host, hiddenByUser);
         if (show && !IsVisible) Show(); else if (!show && IsVisible) Hide();
-        if (show && !dragging) PositionNearHost();
+        uiHealth?.Enter("tick:position");
+        if (show && !dragging) { PositionNearHost(); Native.PlaceAboveHost(handle, host); }
+        uiHealth?.Enter("tick:details");
         UpdateTime(); UpdateFreshness(); refreshDetail?.Invoke();
         if (!B(snapshot["historyLoading"])) disclosure.Observe(ActiveIssues().Where(i => S(i["severity"]) == "critical").Select(i => S(i["id"]) + ":critical"), DateTimeOffset.UtcNow);
         UpdateDisclosure();
@@ -390,9 +426,9 @@ public partial class MainWindow : Window
             Native.GetWindowRect(handle, out var bounds);
             try
             {
-                Directory.CreateDirectory(Settings.StateDirectory);
-                File.WriteAllText(Path.Combine(Settings.StateDirectory, "window-state.json"), System.Text.Json.JsonSerializer.Serialize(new {
+                DiagnosticFiles.Write("window-state.json", System.Text.Json.JsonSerializer.Serialize(new {
                     visible = Native.IsWindowVisible(handle), wpfVisible = IsVisible, foregroundProcess,
+                    windowMode = "independent", uiThreadId = Native.GetWindowThreadProcessId(handle, out _),
                     hostWindow = host.ToInt64(), ownerWindow = Native.GetWindow(handle, 4).ToInt64(), topmost = (Native.GetWindowLongPtr(handle, -20).ToInt64() & 8) != 0, window = handle.ToInt64(), threadId = currentThread,
                     foregroundAboveOverlay = Native.IsAbove(foreground, handle), overlayAboveHost = Native.IsAbove(handle, host),
                     left = bounds.Left, top = bounds.Top, width = bounds.Width, height = bounds.Height,
@@ -401,6 +437,7 @@ public partial class MainWindow : Window
         }
         if (!capturedLive && show && !B(snapshot["historyLoading"]) && currentThread is not null && Arg("--capture-once") is { } capturePath)
         { capturedLive = true; Capture(capturePath); }
+        uiHealth?.Beat();
     }
     private void PositionNearHost()
     {
@@ -416,12 +453,10 @@ public partial class MainWindow : Window
         if (!Native.GetWindowRect(handle, out var previous) || previous.Left != x || previous.Top != y)
             Native.SetWindowPos(handle, IntPtr.Zero, x, y, 0, 0, 0x0010 | 0x0001 | 0x0004); // No activation, size or z-order change.
     }
-    private void AttachHost(IntPtr candidate)
+    private void FollowHost(IntPtr candidate)
     {
         host = candidate;
-        // Keep WPF's cached owner in sync; a raw HWND assignment is overwritten by Show().
-        new WindowInteropHelper(this).Owner = host;
-        Native.AttachToHost(handle, host);
+        // No foreign owner/parent: Codex and the overlay keep separate input queues.
     }
     private void BeginDrag(object sender, MouseButtonEventArgs e)
     {
@@ -449,16 +484,16 @@ public partial class MainWindow : Window
     {
         tray = new Forms.NotifyIcon { Icon = System.Drawing.SystemIcons.Information, Text = "Codex 状态浮窗", Visible = true };
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("显示 / 隐藏", null, (_, _) => Dispatcher.Invoke(() => { hiddenByUser = !hiddenByUser; if (preview) { if (hiddenByUser) Hide(); else Show(); } else Tick(); }));
-        menu.Items.Add("重新连接", null, (_, _) => Dispatcher.Invoke(() => { if (!preview) StartCollector(); }));
+        menu.Items.Add("显示 / 隐藏", null, (_, _) => Dispatcher.BeginInvoke(() => { hiddenByUser = !hiddenByUser; if (preview) { if (hiddenByUser) Hide(); else Show(); } else Tick(); }));
+        menu.Items.Add("重新连接", null, (_, _) => Dispatcher.BeginInvoke(() => { if (!preview) StartCollector(); }));
         if (preview)
         {
-            menu.Items.Add("演示正常状态", null, (_, _) => Dispatcher.Invoke(() => { disclosure = new Disclosure(true); ApplySnapshot(Demo(false)); }));
-            menu.Items.Add("演示异常状态", null, (_, _) => Dispatcher.Invoke(() => { disclosure = new Disclosure(true); ApplySnapshot(Demo(true)); }));
+            menu.Items.Add("演示正常状态", null, (_, _) => Dispatcher.BeginInvoke(() => { disclosure = new Disclosure(true); ApplySnapshot(Demo(false)); }));
+            menu.Items.Add("演示异常状态", null, (_, _) => Dispatcher.BeginInvoke(() => { disclosure = new Disclosure(true); ApplySnapshot(Demo(true)); }));
         }
-        menu.Items.Add("退出浮窗", null, (_, _) => Dispatcher.Invoke(Close));
+        menu.Items.Add("退出浮窗", null, (_, _) => Dispatcher.BeginInvoke(Close));
         tray.ContextMenuStrip = menu;
-        tray.DoubleClick += (_, _) => Dispatcher.Invoke(() => { hiddenByUser = false; if (preview) Show(); else Tick(); });
+        tray.DoubleClick += (_, _) => Dispatcher.BeginInvoke(() => { hiddenByUser = false; if (preview) Show(); else Tick(); });
     }
     private void ShowMenu(object sender, RoutedEventArgs e) => OpenMenu();
     private void OpenMenu()

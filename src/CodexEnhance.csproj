@@ -3,7 +3,7 @@
     <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms><Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings><AssemblyName>CodexEnhance</AssemblyName>
-    <ApplicationManifest>app.manifest</ApplicationManifest><Version>0.4.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest><Version>0.5.0</Version>
     <Product>Codex Enhance</Product><Description>Codex status monitor for Windows</Description>
   </PropertyGroup>
   <ItemGroup>

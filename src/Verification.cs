@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Interop;
 
@@ -70,21 +72,66 @@ public static class Verification
         var owner = new Window { Width = 200, Height = 100, ShowInTaskbar = false, ShowActivated = false };
         var attached = new Window { Width = 100, Height = 80, ShowInTaskbar = false, ShowActivated = false };
         var ownerHandle = new WindowInteropHelper(owner).EnsureHandle(); var attachedHandle = new WindowInteropHelper(attached).EnsureHandle();
-        new WindowInteropHelper(attached).Owner = ownerHandle;
-        Native.AttachToHost(attachedHandle, ownerHandle);
-        Check(Native.GetWindow(attachedHandle, 4) == ownerHandle, "overlay has a native owner");
-        Check((Native.GetWindowLongPtr(attachedHandle, -20).ToInt64() & 8) == 0, "owned overlay is not globally topmost");
+        Native.MakeIndependent(attachedHandle);
+        Check(Native.GetWindow(attachedHandle, 4) != ownerHandle, "overlay does not attach its input queue to the host owner");
+        Check((Native.GetWindowLongPtr(attachedHandle, -20).ToInt64() & 8) == 0, "independent overlay is not globally topmost");
         owner.Show(); attached.Show();
-        Check(Native.GetWindow(attachedHandle, 4) == ownerHandle, "WPF Show preserves the native host owner");
+        Check(Native.GetWindow(attachedHandle, 4) != ownerHandle, "WPF Show does not attach a host owner");
         attached.Hide(); attached.Show();
-        Check(Native.GetWindow(attachedHandle, 4) == ownerHandle, "WPF hide/show keeps the host attachment");
+        Check(Native.GetWindow(attachedHandle, 4) != ownerHandle, "WPF hide/show stays independent of the host");
+        Check(Native.ShouldShowNearHost(ownerHandle, false), "visible restored host allows independent overlay visibility");
+        Check(!Native.ShouldShowNearHost(ownerHandle, true), "user can hide the independent overlay");
         var other = new Window { Width = 200, Height = 100, ShowInTaskbar = false, ShowActivated = false }; other.Show(); other.Activate();
-        Check(Native.IsWindowVisible(attachedHandle), "switching to another window does not hide an owned overlay");
+        Check(Native.IsWindowVisible(attachedHandle), "switching to another window keeps the independent overlay available");
         owner.WindowState = WindowState.Minimized;
-        Check(!Native.IsWindowVisible(attachedHandle), "minimizing the owner hides its overlay");
+        Check(Native.IsWindowVisible(attachedHandle), "host minimization cannot change an independent window through ownership");
+        Check(!Native.ShouldShowNearHost(ownerHandle, false), "visibility polling hides the overlay when host is minimized");
+        owner.Hide(); Check(!Native.ShouldShowNearHost(ownerHandle, false), "visibility polling hides the overlay when host is hidden");
         other.Close();
         attached.Close(); owner.Close();
+        {
+            var node = Path.Combine(AppContext.BaseDirectory, "runtime", "node.exe");
+            var fixture = new ProcessStartInfo(File.Exists(node) ? node : "node.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true };
+            fixture.ArgumentList.Add("-e"); fixture.ArgumentList.Add("setInterval(()=>{},1000)");
+            using var legacy = Process.Start(fixture)!;
+            var blockedWrite = Task.Run(() => {
+                try { legacy.StandardInput.WriteLine(new string('x', 1024 * 1024)); legacy.StandardInput.Flush(); } catch { }
+            });
+            try { Check(!blockedWrite.Wait(250), "legacy synchronous pipe write reproduces a blocked caller when collector does not read"); }
+            finally { if (!legacy.HasExited) legacy.Kill(entireProcessTree: true); legacy.WaitForExit(); blockedWrite.Wait(2000); }
+        }
+        var waitChain = JsonNode.Parse(JsonSerializer.Serialize(WaitChainProbe.Read(Native.GetCurrentThreadId())))!;
+        Check(waitChain["available"] is not null, "wait-chain diagnostics safely report availability");
+        if (waitChain["available"]!.GetValue<bool>())
+            Check(waitChain["nodes"]![0]!["processId"]!.GetValue<int>() == Environment.ProcessId && waitChain["nodes"]![0]!["threadId"]!.GetValue<uint>() == Native.GetCurrentThreadId(), "wait-chain native layout returns the current process and GUI thread");
+        using (var client = new CollectorClient()) {
+            var node = Path.Combine(AppContext.BaseDirectory, "runtime", "node.exe");
+            var fixture = new ProcessStartInfo(File.Exists(node) ? node : "node.exe");
+            fixture.ArgumentList.Add("-e"); fixture.ArgumentList.Add("setInterval(()=>{},1000)");
+            var child = client.StartProcess(fixture);
+            using var observer = Process.GetProcessById(child.Id);
+            var watch = Stopwatch.StartNew();
+            for (int i = 0; i < 12; i++) client.Send(new JsonObject { ["type"] = "blocked-fixture", ["payload"] = new string('x', 65536) });
+            Check(watch.ElapsedMilliseconds < 500, "sending into a non-reading collector never waits for pipe backpressure on the caller");
+            watch.Restart(); var stopped = client.StopAsync();
+            Check(watch.ElapsedMilliseconds < 200, "collector disposal returns without waiting on the caller");
+            Check(stopped.Wait(TimeSpan.FromSeconds(6)), "unresponsive collector cleanup has a bounded deadline");
+            Check(observer.WaitForExit(1000), "unresponsive collector process is terminated without leaving an orphan");
+        }
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
-        File.WriteAllText(output, JsonSerializer.Serialize(new { passed = checks.Count, checks }, Settings.JsonOptions));
+        var healthDirectory = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(output))!, "verification-health-" + Environment.ProcessId);
+        var priorHealthDirectory = Environment.GetEnvironmentVariable("CODEX_ENHANCE_STATE_DIR");
+        try {
+            Environment.SetEnvironmentVariable("CODEX_ENHANCE_STATE_DIR", healthDirectory);
+            using var health = new UiHealth(); health.Enter("verification:blocked-ui");
+            System.Threading.Thread.Sleep(6200);
+            var healthPath = Path.Combine(healthDirectory, "ui-health.jsonl");
+            var deadline = Stopwatch.StartNew();
+            while (!File.Exists(healthPath) && deadline.ElapsedMilliseconds < 3000) System.Threading.Thread.Sleep(50);
+            Check(File.Exists(healthPath) && File.ReadAllText(healthPath).Contains("verification:blocked-ui") && File.ReadAllText(healthPath).Contains("waitChain"), "background watchdog records an unresponsive GUI stage and wait-chain availability");
+            health.Beat(); System.Threading.Thread.Sleep(1300);
+            Check(File.ReadAllText(healthPath).Contains("recovered"), "watchdog records recovery after the GUI heartbeat resumes");
+        } finally { Environment.SetEnvironmentVariable("CODEX_ENHANCE_STATE_DIR", priorHealthDirectory); }
+        File.WriteAllText(output, JsonSerializer.Serialize(new { passed = checks.Count, checks, waitChain }, Settings.JsonOptions));
     }
 }

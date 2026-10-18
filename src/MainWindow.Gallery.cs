@@ -147,6 +147,7 @@ public partial class MainWindow
         settings.QuotaNormalizeFast=savedFast;settings.QuotaIncludeAstraLongContext=savedAstra;
         detailWindow?.Close();detailWindow=null;ApplySnapshot(data);
         File.WriteAllText(Path.Combine(directory,"fast-display-check.json"),System.Text.Json.JsonSerializer.Serialize(new {noFastClear,recordedFastPreserved,passed=noFastClear&&recordedFastPreserved},Settings.JsonOptions));
+        RenderNetworkGallery(directory,data);
         RenderConversationGallery(directory,data);
         RenderDesignGallery(directory,data);
     }
