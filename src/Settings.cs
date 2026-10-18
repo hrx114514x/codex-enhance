@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
@@ -13,6 +14,8 @@ public sealed class Settings
     public double RightOffset { get; set; } = 22;
     public double? TopOffset { get; set; }
     public string Theme { get; set; } = "system";
+    public Dictionary<string,string> CustomLightColors { get; set; } = new();
+    public Dictionary<string,string> CustomDarkColors { get; set; } = new();
     public string? NodePath { get; set; }
     public bool QuotaIncludeAstraLongContext { get; set; } = false;
     public bool QuotaNormalizeFast { get; set; } = true;

@@ -171,7 +171,7 @@ public partial class MainWindow : Window
         var active = S(data["phase"]) is "working" or "compacting";
         PhaseDot.Fill = BrushFor(active ? "Accent" : "Faint");
         ContextText.Text = Percent(N(data["context"]?["percent"])); CacheText.Text = Percent(N(data["cacheHit"]));
-        ContextFill.Width = 83 * Math.Clamp(N(data["context"]?["percent"]) ?? 0, 0, 100) / 100;
+        ContextFill.Width = 136 * Math.Clamp(N(data["context"]?["percent"]) ?? 0, 0, 100) / 100;
         ContextText.ToolTip = "最近一次上下文采样，不是累计 token 消耗";
         CacheText.ToolTip = "最近一次请求的缓存输入占比";
         ModelText.Text = CurrentModelText(data);
@@ -266,6 +266,7 @@ public partial class MainWindow : Window
         ToolsChevron.Content = Icons.Create(disclosure.ToolsExpanded ? "chevron-down" : "chevron-right", 16);
         ToolsButton.SetValue(System.Windows.Automation.AutomationProperties.NameProperty, disclosure.ToolsExpanded ? "收起工具调用" : "展开工具调用");
         Width = disclosure.Expanded ? 386 : 292;
+        UpdateDesignSummary();
     }
     private void PopulateTools()
     {
@@ -287,7 +288,7 @@ public partial class MainWindow : Window
     private TextBlock Text(string value, string color = "Text", double size = 13) => new() { Text = value, Foreground = BrushFor(color), FontSize = size, TextWrapping = TextWrapping.Wrap };
     private FrameworkElement ToolView(JsonObject item, bool issue)
     {
-        var outer = new StackPanel { Margin = new Thickness(0, 4, 0, 11) };
+        var outer = new StackPanel();
         var line = new DockPanel();
         var level = S(item["severity"]);
         if (issue) { var icon = Icons.Create("info", 17, SeverityColor(level)); icon.Margin = new Thickness(0, 2, 10, 0); DockPanel.SetDock(icon, Dock.Left); line.Children.Add(icon); }
@@ -299,7 +300,7 @@ public partial class MainWindow : Window
         var exit = N(item["exitCode"]);
         var meta = Text(S(item["name"]) + " · " + Duration(N(item["durationMs"])) + (exit is null ? "" : $" · 退出码 {exit:0}") + (issue ? "" : " · " + (S(item["reason"]) is { Length: > 0 } reason ? reason : state)), "Faint", 12);
         meta.Margin = new Thickness(issue ? 27 : 0, 5, 0, 0); outer.Children.Add(meta);
-        return outer;
+        return new Border { Background=BrushFor("Panel"),CornerRadius=new CornerRadius(10),Padding=new Thickness(12),Margin=new Thickness(0,3,0,5),Child=outer };
     }
     private void ToggleTools(object sender, RoutedEventArgs e) { disclosure.ToggleTools(); PopulateTools(); UpdateDisclosure(); }
     private void Collapse(object sender, RoutedEventArgs e) { disclosure.SetExpanded(false); settings.Expanded = false; Save(); UpdateDisclosure(); }
@@ -335,14 +336,16 @@ public partial class MainWindow : Window
     private Window Detail(string title, FrameworkElement content)
     {
         detailWindow?.Close();
-        var window = new Window { Title = title, Width = 482, Height = 582, WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent, Foreground = BrushFor("Text"), WindowStartupLocation = WindowStartupLocation.CenterScreen, Topmost = false, FontFamily = FontFamily, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = preview, Owner = this };
-        var frame = new Border { Margin=new Thickness(16), CornerRadius = new CornerRadius(18), BorderThickness = new Thickness(1), BorderBrush = BrushFor("Stroke"), Background = BrushFor("Surface") };
-        detailShadow=new DropShadowEffect { Color=Colors.Black, BlurRadius=28, ShadowDepth=5, Direction=270, Opacity=appliedTheme=="light"?.16:.42 };
-        var shell=new Grid();shell.Children.Add(new Border { Margin=new Thickness(16),CornerRadius=new CornerRadius(18),Background=BrushFor("Surface"),Effect=detailShadow,IsHitTestVisible=false });shell.Children.Add(frame);
+        var window = new Window { Title = title, Width = 540, Height = 700, WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent, Foreground = BrushFor("Text"), WindowStartupLocation = WindowStartupLocation.CenterScreen, Topmost = false, FontFamily = FontFamily, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = preview, Owner = this };
+        var frame = new Border { Margin=new Thickness(16), CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(1), BorderBrush = BrushFor("Stroke"), Background = BrushFor("Surface") };
+        detailShadow=new DropShadowEffect { Color=Colors.Black, BlurRadius=28, ShadowDepth=5, Direction=270, Opacity=appliedTheme=="light"?.12:.28 };
+        var shell=new Grid();shell.Children.Add(new Border { Margin=new Thickness(16),CornerRadius=new CornerRadius(20),Background=BrushFor("Surface"),Effect=detailShadow,IsHitTestVisible=false });shell.Children.Add(frame);
         var layout = new Grid(); layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); layout.RowDefinitions.Add(new RowDefinition());
-        var header = new DockPanel { Margin = new Thickness(19, 15, 15, 8), Background = Brushes.Transparent };
-        var close = new Button { Width = 27, Height = 27, Content = Icons.Create("dismiss", 17), ToolTip = "关闭" }; close.Click += (_, _) => window.Close(); DockPanel.SetDock(close, Dock.Right); header.Children.Add(close);
-        header.Children.Add(Text(title.Replace("Codex · ", ""), "Text", 16));
+        var header = new DockPanel { Margin = new Thickness(24, 22, 20, 18), Background = Brushes.Transparent };
+        var close = new Button { Width = 32, Height = 32, Content = Icons.Create("dismiss", 16), ToolTip = "关闭" }; close.Click += (_, _) => window.Close(); DockPanel.SetDock(close, Dock.Right); header.Children.Add(close);
+        var heading=new StackPanel();
+        var headingText=Text(title.Replace("Codex · ", ""), "Text", 22);headingText.FontWeight=FontWeights.SemiBold;heading.Children.Add(headingText);
+        var subtitle=Text(DetailSubtitle(title),"Muted",11);subtitle.Margin=new Thickness(0,6,0,0);heading.Children.Add(subtitle);header.Children.Add(heading);
         header.MouseLeftButtonDown += (_, e) => { if (e.OriginalSource is TextBlock) window.DragMove(); };
         layout.Children.Add(header); Grid.SetRow(content, 1); layout.Children.Add(content); frame.Child = layout; window.Content = shell;
         window.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) window.Close(); };
@@ -350,7 +353,7 @@ public partial class MainWindow : Window
         window.Loaded += (_, _) => {
             var area = Forms.Screen.FromHandle(handle).WorkingArea;
             double scale = Math.Max(1, Native.GetDpiForWindow(handle) / 96d);
-            window.Height = Math.Min(652, area.Height / scale - 16);
+            window.Height = Math.Min(720, area.Height / scale - 16);
             window.Left = Math.Clamp(Left - window.Width - 12, area.Left / scale + 12, Math.Max(area.Left / scale + 12, area.Right / scale - window.Width - 12));
             window.Top = Math.Clamp(Top, area.Top / scale + 12, Math.Max(area.Top / scale + 12, area.Bottom / scale - window.Height - 12));
         };
@@ -471,24 +474,24 @@ public partial class MainWindow : Window
         Add("当前模型", () => OpenModels(this, new RoutedEventArgs()));
         Add("恢复默认位置", () => { settings.RightOffset = 22; settings.TopOffset = null; Save(); PositionNearHost(); });
         menu.Items.Add(new Separator());
+        Add("外观与配色…", () => OpenAppearance(this,new RoutedEventArgs()));
         Add("跟随系统主题", () => { settings.Theme = "system"; ApplyTheme(); Save(); });
         Add("深色外观", () => { settings.Theme = "dark"; ApplyTheme(); Save(); });
         Add("浅色外观", () => { settings.Theme = "light"; ApplyTheme(); Save(); });
         menu.Items.Add(new Separator()); Add("退出浮窗", Close);
         menu.PlacementTarget = MenuButton; menu.IsOpen = true;
     }
-    private void ApplyTheme()
+    private void ApplyTheme(bool force=false)
     {
         var theme = settings.Theme;
         if (theme == "system") { using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"); theme = (key?.GetValue("AppsUseLightTheme") as int? ?? 0) == 0 ? "dark" : "light"; }
         if (args.Contains("--light")) theme = "light";
-        if (theme == appliedTheme) return; appliedTheme = theme;
-        var colors = theme == "light" ? new Dictionary<string, string> { ["Surface"]="#FCFCFD",["Stroke"]="#DADDE2",["Text"]="#20232B",["Muted"]="#626B79",["Faint"]="#747D8B",["Line"]="#E9ECF0",["Track"]="#E0E5EB",["Hover"]="#F0F3F7",["Accent"]="#3478CA",["Attention"]="#946313",["Error"]="#AB493E",["Critical"]="#B52E49" }
-            : new Dictionary<string, string> { ["Surface"]="#25272C",["Stroke"]="#43464E",["Text"]="#F5F7FB",["Muted"]="#B6BECA",["Faint"]="#969FAE",["Line"]="#373B44",["Track"]="#424853",["Hover"]="#30343D",["Accent"]="#87B4FF",["Attention"]="#E8B875",["Error"]="#EEA193",["Critical"]="#FA879A" };
+        if (theme == appliedTheme && !force) return; appliedTheme = theme;
+        var colors = DesignTokens.Resolve(theme=="light",theme=="light"?settings.CustomLightColors:settings.CustomDarkColors);
         var oldColors=colors.Keys.Select(key=>(key,brush:Application.Current.Resources[key] as SolidColorBrush)).Where(p=>p.brush is not null).GroupBy(p=>p.brush!.Color).ToDictionary(g=>g.Key,g=>g.First().key);
         foreach (var pair in colors) Application.Current.Resources[pair.Key]=new SolidColorBrush((Color)ColorConverter.ConvertFromString(pair.Value));
         if(detailWindow is not null) RethemeVisual(detailWindow,oldColors);
-        SurfaceShadow.Opacity=theme=="light"?.16:.42;if(detailShadow is not null)detailShadow.Opacity=SurfaceShadow.Opacity;
+        SurfaceShadow.Opacity=theme=="light"?.12:.28;if(detailShadow is not null)detailShadow.Opacity=SurfaceShadow.Opacity;
         if (snapshot.Count > 0) { issuesKey = ""; ApplySnapshot(snapshot); }
     }
     private static void RethemeVisual(DependencyObject root,IReadOnlyDictionary<Color,string> palette)

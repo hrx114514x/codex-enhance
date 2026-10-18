@@ -22,22 +22,22 @@ public partial class MainWindow
         if (stale) { PhaseText.Text = "状态待更新"; PillPhase.Text = "状态待更新"; PhaseDot.Fill = PillDot.Fill = BrushFor("Faint"); }
     }
 
-    private StackPanel DetailStack() => new() { Margin = new Thickness(22, 8, 22, 22) };
+    private StackPanel DetailStack() => new() { Margin = new Thickness(24, 0, 24, 24) };
     private void Section(StackPanel stack, string title)
     {
-        var label = Text(title, "Text", 13); label.FontWeight = FontWeights.SemiBold; label.Margin = new Thickness(0, 16, 0, 10); stack.Children.Add(label);
+        var label = Text(title, "Text", 13); label.FontWeight = FontWeights.SemiBold; label.Margin = new Thickness(0, 23, 0, 11); stack.Children.Add(label);
     }
     private Action<string> MetricRow(StackPanel stack, string title)
     {
-        var grid = new Grid { Margin = new Thickness(0, 6, 0, 6) };
+        var grid = new Grid { Margin = new Thickness(0, 0, 0, 0) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.35, GridUnitType.Star) });
         var label = Text(title, "Muted", 12); label.Margin = new Thickness(0, 0, 12, 0); grid.Children.Add(label);
-        var value = Text("—", "Text", 12); value.TextAlignment = TextAlignment.Right; Grid.SetColumn(value, 1); grid.Children.Add(value); stack.Children.Add(grid);
+        var value = Text("—", "Text", 12); value.TextAlignment = TextAlignment.Right; Grid.SetColumn(value, 1); grid.Children.Add(value); stack.Children.Add(new Border { Background=BrushFor("Panel"),CornerRadius=new CornerRadius(8),Padding=new Thickness(12,10,12,10),Margin=new Thickness(0,2,0,2),Child=grid });
         return text => value.Text = text;
     }
     private void Note(StackPanel stack, string text)
-    { var label = Text(text, "Faint", 11); label.Margin = new Thickness(0, 12, 0, 0); stack.Children.Add(label); }
+    { var label = Text(text, "Faint", 11); label.Margin = new Thickness(0, 12, 0, 0); label.LineHeight=17; stack.Children.Add(label); }
 
     private void OpenMetrics(object sender, RoutedEventArgs e)
     {

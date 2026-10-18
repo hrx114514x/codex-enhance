@@ -97,7 +97,7 @@ public partial class MainWindow
         CaptureGalleryDetail(Path.Combine(directory,"voice.png"));
         settings.Theme="light";ApplyTheme();
         var openFrame=(System.Windows.Controls.Border)((System.Windows.Controls.Grid)detailWindow!.Content).Children[1];
-        bool openDialogThemeUpdates=((SolidColorBrush)openFrame.Background).Color==Color.FromRgb(252,252,253);
+        bool openDialogThemeUpdates=((SolidColorBrush)openFrame.Background).Color==((SolidColorBrush)BrushFor("Surface")).Color;
         CaptureGalleryDetail(Path.Combine(directory,"voice-light.png"));
         File.WriteAllText(Path.Combine(directory,"theme-check.json"),System.Text.Json.JsonSerializer.Serialize(new {openDialogThemeUpdates,passed=openDialogThemeUpdates},Settings.JsonOptions));
         settings.Theme="dark";ApplyTheme();
@@ -148,6 +148,7 @@ public partial class MainWindow
         detailWindow?.Close();detailWindow=null;ApplySnapshot(data);
         File.WriteAllText(Path.Combine(directory,"fast-display-check.json"),System.Text.Json.JsonSerializer.Serialize(new {noFastClear,recordedFastPreserved,passed=noFastClear&&recordedFastPreserved},Settings.JsonOptions));
         RenderConversationGallery(directory,data);
+        RenderDesignGallery(directory,data);
     }
     private void CaptureGalleryDetail(string file)
     {

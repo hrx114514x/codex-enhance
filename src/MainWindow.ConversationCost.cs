@@ -29,20 +29,23 @@ public partial class MainWindow
     private void UpdateConversationCostSummary()
     {
         ConversationCostSummary.Text = ConversationAmountText(CurrentConversationCost);
+        ConversationCostSummary.FontSize=ConversationCostSummary.Text.Length>12?14:20;
         ConversationCostSummary.ToolTip = "此对话本机模型用量 · 更新于 " + LocalTime(N(CurrentConversationCost?["sampledAtMs"]));
     }
     private Action AddConversationCost(StackPanel stack)
     {
+        var hero=new StackPanel();
+        stack.Children.Add(new Border {Background=BrushFor("Panel"),CornerRadius=new CornerRadius(14),Padding=new Thickness(20,17,20,18),Child=hero});
         var heading = new DockPanel();
         var refresh = new Button { Content="刷新", FontSize=11, Padding=new Thickness(9,4,9,4), Foreground=BrushFor("Muted") };
         AutomationProperties.SetName(refresh,"刷新此对话费用"); DockPanel.SetDock(refresh,Dock.Right); heading.Children.Add(refresh);
-        var label=Text("此对话费用估算","Text",14); label.FontWeight=FontWeights.SemiBold; label.VerticalAlignment=VerticalAlignment.Center; heading.Children.Add(label); stack.Children.Add(heading);
-        var title=Text("","Muted",11); title.Margin=new Thickness(0,8,0,0); title.TextTrimming=TextTrimming.CharacterEllipsis; title.TextWrapping=TextWrapping.NoWrap; stack.Children.Add(title);
-        var amount=Text("","Text",30); amount.FontWeight=FontWeights.SemiBold; amount.Margin=new Thickness(0,9,0,0); stack.Children.Add(amount);
+        var label=Text("累计等效用量","Muted",12); label.FontWeight=FontWeights.SemiBold; label.VerticalAlignment=VerticalAlignment.Center; heading.Children.Add(label); hero.Children.Add(heading);
+        var title=Text("","Muted",11); title.Margin=new Thickness(0,8,0,0); title.TextTrimming=TextTrimming.CharacterEllipsis; title.TextWrapping=TextWrapping.NoWrap; hero.Children.Add(title);
+        var amount=Text("","Text",36); amount.FontWeight=FontWeights.SemiBold; amount.Margin=new Thickness(0,15,0,0); hero.Children.Add(amount);
         var scopeRow=new Grid { Margin=new Thickness(0,9,0,1) };scopeRow.ColumnDefinitions.Add(new ColumnDefinition());scopeRow.ColumnDefinitions.Add(new ColumnDefinition());
-        var turnAmount=Text("","Muted",12);var todayAmount=Text("","Muted",12);Grid.SetColumn(todayAmount,1);scopeRow.Children.Add(turnAmount);scopeRow.Children.Add(todayAmount);stack.Children.Add(scopeRow);
+        var turnAmount=Text("","Muted",12);var todayAmount=Text("","Muted",12);Grid.SetColumn(todayAmount,1);scopeRow.Children.Add(turnAmount);scopeRow.Children.Add(todayAmount);hero.Children.Add(scopeRow);
         scopeRow.ToolTip="本轮为当前一轮任务；今天从本机零点起算。均只计已记录的用量。";
-        var status=Text("","Faint",11); status.Margin=new Thickness(0,6,0,0); stack.Children.Add(status);
+        var status=Text("","Faint",11); status.Margin=new Thickness(0,6,0,0); hero.Children.Add(status);
         var automaticRow=new Grid { Margin=new Thickness(0,14,0,0) };
         automaticRow.ColumnDefinitions.Add(new ColumnDefinition()); automaticRow.ColumnDefinitions.Add(new ColumnDefinition { Width=GridLength.Auto });
         var autoLabel=Text("自动刷新 · 每 10 秒","Muted",12); autoLabel.VerticalAlignment=VerticalAlignment.Center; automaticRow.Children.Add(autoLabel);
@@ -63,7 +66,7 @@ public partial class MainWindow
         AutomationProperties.SetName(disclosure,"展开此对话用量明细"); stack.Children.Add(disclosure);
         var details=new StackPanel { Visibility=Visibility.Collapsed }; stack.Children.Add(details);
         disclosure.Click+=(_,_)=>{ expanded=!expanded; details.Visibility=expanded?Visibility.Visible:Visibility.Collapsed; disclosure.Content=expanded?"用量明细  ⌄":"用量明细  ›"; refreshDetail?.Invoke(); };
-        stack.Children.Add(new Border { Height=1,Background=BrushFor("Line"),Margin=new Thickness(0,17,0,16) });
+
         return () => {
             var cost=CurrentConversationCost;
             title.Text=S(snapshot["title"],"未选择对话"); title.ToolTip=title.Text;

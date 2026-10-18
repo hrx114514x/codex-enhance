@@ -47,14 +47,24 @@ public partial class MainWindow
     private void OpenQuota(object sender, RoutedEventArgs e)
     {
         var stack = DetailStack();
-        var updateConversation = AddConversationCost(stack);
+        var conversationSection=new StackPanel();var accountSection=new StackPanel();
+        var tabs=new Grid { Margin=new Thickness(0,0,0,20) };tabs.ColumnDefinitions.Add(new ColumnDefinition());tabs.ColumnDefinitions.Add(new ColumnDefinition());
+        var conversationTab=Segment("此对话","查看对话费用分区");var accountTab=Segment("账号额度","查看账号额度分区");Grid.SetColumn(accountTab,1);
+        conversationTab.Margin=new Thickness(0,0,4,0);accountTab.Margin=new Thickness(4,0,0,0);tabs.Children.Add(conversationTab);tabs.Children.Add(accountTab);
+        stack.Children.Add(tabs);stack.Children.Add(conversationSection);stack.Children.Add(accountSection);
+        bool conversationSelected=ReferenceEquals(sender,ConversationCostButton);
+        void Choose(bool conversation) { conversationSelected=conversation;conversationSection.Visibility=conversation?Visibility.Visible:Visibility.Collapsed;accountSection.Visibility=conversation?Visibility.Collapsed:Visibility.Visible;SelectSegment(conversationTab,conversation);SelectSegment(accountTab,!conversation); }
+        conversationTab.Click+=(_,_)=>{Choose(true);refreshDetail?.Invoke();};accountTab.Click+=(_,_)=>{Choose(false);refreshDetail?.Invoke();};Choose(conversationSelected);
+        var updateConversation = AddConversationCost(conversationSection);
         var top = new DockPanel();
         var refresh = new Button { Content = "刷新", FontSize = 11, Padding = new Thickness(9,4,9,4), Foreground = BrushFor("Muted") };
         DockPanel.SetDock(refresh, Dock.Right); top.Children.Add(refresh);
-        var subtitle = Text("", "Muted", 12); subtitle.VerticalAlignment = VerticalAlignment.Center; top.Children.Add(subtitle); stack.Children.Add(top);
-        var panels = new StackPanel(); stack.Children.Add(panels);
-        var status = Text("", "Muted", 12); status.Margin = new Thickness(0,12,0,0); stack.Children.Add(status);
-        stack.Children.Add(new Border { Height = 1, Background = BrushFor("Line"), Margin = new Thickness(0,20,0,14) });
+        var subtitle = Text("", "Muted", 12); subtitle.VerticalAlignment = VerticalAlignment.Center; top.Children.Add(subtitle); accountSection.Children.Add(top);
+        var panels = new StackPanel(); accountSection.Children.Add(panels);
+        var status = Text("", "Muted", 12); status.Margin = new Thickness(0,12,0,0); accountSection.Children.Add(status);
+        var pricingPanel=new StackPanel();
+        var pricingHeading=Text("估算口径","Text",12);pricingHeading.FontWeight=FontWeights.SemiBold;pricingHeading.Margin=new Thickness(0,0,0,10);pricingPanel.Children.Add(pricingHeading);
+        stack.Children.Add(new Border { Background=BrushFor("Panel"),CornerRadius=new CornerRadius(12),Padding=new Thickness(16,14,16,9),Margin=new Thickness(0,22,0,0),Child=pricingPanel });
         bool detailsOpen = false;
         void Switch(string label, string hint, bool value, Action<bool> changed)
         {
@@ -62,18 +72,18 @@ public partial class MainWindow
             row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var text = Text(label,"Text",12); text.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(text);
             var toggle = new ToggleButton { Style = (Style)FindResource("QuotaSwitch"), IsChecked = value, ToolTip = hint };
-            AutomationProperties.SetName(toggle,label); Grid.SetColumn(toggle,1); row.Children.Add(toggle); stack.Children.Add(row);
+            AutomationProperties.SetName(toggle,label); Grid.SetColumn(toggle,1); row.Children.Add(toggle); pricingPanel.Children.Add(row);
             toggle.Click += (_,_) => { changed(toggle.IsChecked == true); Save(); SendQuotaOptions(); UpdateConversationCostSummary(); refreshDetail?.Invoke(); };
         }
         Switch("计入 Astra 长上下文加价", "仅调整等效估算。超过 272K 输入时，输入/缓存 ×2、输出 ×1.5；Codex Astra 默认不计入。", settings.QuotaIncludeAstraLongContext, v => settings.QuotaIncludeAstraLongContext=v);
         Switch("计入已记录的 Fast 倍率", "只换算有 Fast 记录的用量；未记录速度的请求按普通速度估算。此开关不会开启 Codex 的 Fast 模式。", settings.QuotaNormalizeFast, v => settings.QuotaNormalizeFast=v);
         var disclosure = new Button { Content = "计算明细  ›", FontSize = 11, Foreground = BrushFor("Muted"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0,10,0,0), Padding = new Thickness(0,5,6,5) };
-        var links=new DockPanel(); stack.Children.Add(links);
+        var links=new DockPanel(); accountSection.Children.Add(links);
         var historyButton=new Button { Content="每周记录  ›", FontSize=11, Foreground=BrushFor("Muted"), Margin=new Thickness(0,10,0,0), Padding=new Thickness(6,5,0,5) };
         AutomationProperties.SetName(historyButton,"查看每周记录"); historyButton.Click+=OpenQuotaHistory;
         DockPanel.SetDock(historyButton,Dock.Right);links.Children.Add(historyButton);
         AutomationProperties.SetName(disclosure,"展开计算明细"); links.Children.Add(disclosure);
-        var details = new StackPanel { Visibility = Visibility.Collapsed }; stack.Children.Add(details);
+        var details = new StackPanel { Visibility = Visibility.Collapsed }; accountSection.Children.Add(details);
         disclosure.Click += (_,_) => { detailsOpen=!detailsOpen; details.Visibility=detailsOpen?Visibility.Visible:Visibility.Collapsed; disclosure.Content=detailsOpen?"计算明细  ⌄":"计算明细  ›"; AutomationProperties.SetName(disclosure,detailsOpen?"收起计算明细":"展开计算明细"); refreshDetail?.Invoke(); };
         DateTimeOffset queuedUntil = DateTimeOffset.MinValue;
         refresh.Click += (_,_) => { if (!preview && collector?.IsRunning != true) StartCollector(); Send("refreshQuota"); queuedUntil=DateTimeOffset.UtcNow.AddSeconds(4); };
@@ -142,7 +152,7 @@ public partial class MainWindow
             }
             var area=System.Windows.Forms.Screen.FromHandle(handle).WorkingArea;
             double scale=Math.Max(1,Native.GetDpiForWindow(handle)/96d);
-            dialog.Height=Math.Min(742,area.Height/scale-16);
+            dialog.Height=Math.Min(conversationSelected?690:742,area.Height/scale-16);
             dialog.Top=Math.Clamp(dialog.Top,area.Top/scale+12,Math.Max(area.Top/scale+12,area.Bottom/scale-dialog.Height-12));
             foreach(var tick in tickers) tick();
         };
