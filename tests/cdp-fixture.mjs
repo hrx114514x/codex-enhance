@@ -14,7 +14,16 @@ store.listMcpServers = async params => {
   if (params.threadId !== id || params.detail !== 'toolsAndAuthOnly') throw new Error('unexpected capability request');
   return { data: [{ name: 'codex_app', runtimeStatus: 'connected', tools: directoryTools, toolsError: null, authStatus: 'unsupported' }], nextCursor: null };
 };
-globalThis.__codexRoot = { _internalRoot: { current: { memoizedState: { memoizedState: store, next: null } } } };
+if(process.argv.includes('--signal-store')) {
+  store.hostId='local';store.sendRequest=async(method,params)=>{
+    if(method==='account/read'){if(params.refreshToken!==false)throw Error('Auth refresh forbidden');return {account:{type:'chatgpt',planType:'pro'}};}
+    if(method==='account/rateLimits/read')return {rateLimits:{limitId:'codex',planType:'pro',primary:{usedPercent:10,windowDurationMins:10080,resetsAt:Math.floor(Date.now()/1000)+86400}}};
+    throw Error('Unexpected request');
+  };
+  const atom={read(){},write(){}},values=new WeakMap([[atom,store]]),reader={get:key=>values.get(key)};
+  const node={store:reader,familyBindings:new Map([[{kind:'signal-family'},new Map([['local',{value:{atom,store:reader}}]])]])};
+  globalThis.__codexRoot={_internalRoot:{current:{memoizedState:{memoizedState:{current:{node}}}}}};
+}else globalThis.__codexRoot = { _internalRoot: { current: { memoizedState: { memoizedState: store, next: null } } } };
 inspector.open(0, '127.0.0.1');
 const server = http.createServer((req, res) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify([{ id: 'isolated-fixture', type: 'page', url: 'app://-/index.html', webSocketDebuggerUrl: inspector.url() }])); });
 server.listen(0, '127.0.0.1', () => process.send?.({ port: server.address().port, id }));

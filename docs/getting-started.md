@@ -2,7 +2,7 @@
 
 ## 安装
 
-v0.5.0 发行包包含新版界面与自定义配色。源码运行方式见 [开发文档](development.md)。
+v0.5.1 发行包包含新版界面与自定义配色。源码运行方式见 [开发文档](development.md)。
 
 从 [Releases](https://github.com/hrx114514x/codex-enhance/releases/latest) 下载 Windows x64 压缩包，完整解压后双击 **Start Codex.cmd**。运行环境已包含。
 

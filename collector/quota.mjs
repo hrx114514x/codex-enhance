@@ -9,7 +9,7 @@ import { PricingUpdates } from './pricing-updates.mjs';
 // Two read-only account methods; never refresh auth, buy credits or consume resets.
 export async function readAccountQuota() {
   const store = globalThis.__codexEnhanceReadCache?.store;
-  if (typeof store?.sendRequest !== 'function') return null;
+  if (typeof store?.sendRequest !== 'function') return { reason:'runtime_unavailable',windows:[] };
   const [limits,auth] = await Promise.all([
     store.sendRequest('account/rateLimits/read', {}, { priority: 'background', timeoutMs: 8000 }),
     store.sendRequest('account/read', { refreshToken: false }, { priority: 'background', timeoutMs: 8000 })
@@ -20,6 +20,7 @@ export async function readAccountQuota() {
     windows: [bucket?.primary, bucket?.secondary].filter(Boolean).map(w => ({ usedPercent: w.usedPercent, minutes: w.windowDurationMins, resetsAt: w.resetsAt })), checkedAtMs: Date.now() };
 }
 export function normalizeQuota(raw, salt, now = Date.now()) {
+  if(raw?.reason==='runtime_unavailable')return {state:'unavailable',reason:'runtime_unavailable',windows:[]};
   if (!raw || !Array.isArray(raw.windows)) return { state: 'unavailable', reason: 'quota_unavailable', windows: [] };
   if (raw.authType !== 'chatgpt') return { state: 'unavailable', reason: 'not_subscription', windows: [] };
   const plan = String(raw.plan ?? '').toLowerCase();

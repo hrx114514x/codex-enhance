@@ -8,6 +8,7 @@ import path from 'node:path';
 import { DesktopLink } from '../collector/cdp.mjs';
 import { ThreadState } from '../collector/state.mjs';
 import { CapabilityMonitor } from '../collector/capabilities.mjs';
+import {readAccountQuota} from '../collector/quota.mjs';
 
 test('CDP discovery, focus selection, live tools and completion work through a real protocol endpoint', async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-cdp-'));
@@ -39,4 +40,14 @@ test('CDP discovery, focus selection, live tools and completion work through a r
   assert.equal(state.snapshot(Date.now(),true).tools.running,1);
   assert.equal(state.snapshot(Date.now(),true).activity.runningCount,1);
   assert.ok(state.snapshot(Date.now(),true).tools.items.filter(i=>i.name==='sleep').every(i=>i.status==='unknown'));
+});
+
+test('signal-backed client restores both runtime and read-only quota through CDP',async t=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ce-cdp-signal-'));
+  const child=fork(new URL('./cdp-fixture.mjs',import.meta.url),['--signal-store'],{stdio:['ignore','ignore','ignore','ipc'],windowsHide:true});
+  const link=new DesktopLink(directory,{fallbackPorts:[],includeAppPort:false});
+  t.after(async()=>{link.close();if(child.connected){child.send({type:'stop'});await once(child,'exit');}fs.rmSync(directory,{recursive:true});});
+  const [{port,id}]=await once(child,'message');fs.writeFileSync(path.join(directory,'connection.json'),JSON.stringify({port}));
+  const view=await link.poll(null);assert.equal(view.threadId,id);assert.equal(view.runtime.turns[0].items.length,2);
+  const quota=await link.activeSession.evaluate(`(${readAccountQuota.toString()})()`);assert.equal(quota.authType,'chatgpt');assert.equal(quota.windows[0].usedPercent,10);
 });

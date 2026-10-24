@@ -97,19 +97,44 @@ export function readRuntimeStore(threadId) {
     // State providers and hooks are direct owners. Walking their values avoids
     // traversing hundreds of thousands of unrelated DOM/React element objects.
     const fibers = root ? [root] : [], visitedFibers = new WeakSet(), seeds = [], seedSet = new WeakSet();
+    const scopeNodes = new WeakSet(); let signalReads = 0;
+    const fiberDeadline = performance.now() + 18;
+    const cachedManager = node => {
+      if (store || !node || typeof node !== 'object' || scopeNodes.has(node)) return;
+      if (!(node.familyBindings instanceof Map) || typeof node.store?.get !== 'function') return;
+      scopeNodes.add(node);
+      // Current clients retain host managers in already-bound writable signals.
+      // Read only existing local slots, never resolve a family, subscribe, mount
+      // a query, or execute a manager factory. No bundle names are required.
+      for (const [family, members] of node.familyBindings) {
+        if (performance.now() >= fiberDeadline || signalReads >= 32) break;
+        if (family?.kind !== 'signal-family' || !(members instanceof Map)) continue;
+        const signal = members.get('local')?.value;
+        if (!signal?.atom || signal.store !== node.store || typeof signal.atom.read !== 'function' || typeof signal.atom.write !== 'function') continue;
+        signalReads++;
+        try {
+          const candidate = node.store.get(signal.atom);
+          if (usableStore(candidate) && candidate.hostId === 'local' && typeof candidate.sendRequest === 'function') { store = candidate; return; }
+        } catch { /* A retired binding must not hide the remaining local slots. */ }
+      }
+    };
     const seed = value => {
       if (store) return;
       if (!value || typeof value !== 'object' || seedSet.has(value)) return;
       seedSet.add(value); seeds.push(value);
       if (containsThread(value)) { store = value; return; }
+      cachedManager(value); cachedManager(value.node); cachedManager(value.current?.node);
+      if (store) return;
       // New clients keep host managers inside hook arrays. Inspect small
       // containers immediately, before unrelated React state fills the queue.
       const values = Array.isArray(value) && value.length <= 64 ? value
         : value instanceof Map && value.size <= 64 ? value.values()
         : value instanceof Set && value.size <= 64 ? value.values() : [];
-      for (const child of values) if (containsThread(child)) { store = child; return; }
+      for (const child of values) {
+        if (containsThread(child)) { store = child; return; }
+        cachedManager(child); if (store) return;
+      }
     };
-    const fiberDeadline = performance.now() + 18;
     for (let index = 0; !store && index < fibers.length && index < 30000 && performance.now() < fiberDeadline; index++) {
       const fiber = fibers[index];
       if (!fiber || typeof fiber !== 'object' || visitedFibers.has(fiber)) continue;

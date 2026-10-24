@@ -58,6 +58,9 @@ public partial class MainWindow
         disclosure.SetExpanded(true);UpdateDisclosure();UpdateLayout();
         checks["expandedReceivesMouse"]=Hits(ConversationCostButton);
         foreach(bool light in new[]{true,false}){var p=DesignTokens.Palette(light);checks[light?"lightContrast":"darkContrast"]=DesignTokens.Contrast(p["Text"],p["Panel"])>=4.5&&DesignTokens.Contrast(p["Muted"],p["Surface"])>=4.5;}
+        var unavailable=source.DeepClone().AsObject();unavailable["quota"]=new JsonObject{["state"]="unavailable",["reason"]="runtime_unavailable"};ApplySnapshot(unavailable);OpenQuota(this,new RoutedEventArgs());detailWindow!.UpdateLayout();
+        checks["runtimeFailureExplained"]=QuotaSummary.Text=="实时入口待连接"&&VisibleText().Any(t=>t.Text.Contains("正在重新识别"));
+        CaptureGalleryDetail(Path.Combine(directory,"runtime-unavailable.png"));detailWindow.Close();detailWindow=null;
         settings.CustomLightColors=oldLight;settings.CustomDarkColors=oldDark;settings.Theme=oldTheme;ApplyTheme(true);ApplySnapshot(source);
         File.WriteAllText(Path.Combine(directory,"design-check.json"),JsonSerializer.Serialize(new {checks,passed=checks.Values.All(x=>x)},Settings.JsonOptions));
     }

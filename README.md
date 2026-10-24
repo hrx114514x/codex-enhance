@@ -11,7 +11,7 @@
   <img src="docs/screenshots/overview.png" width="360" alt="新版深色浮窗" />
 </p>
 
-*以上及下方均为实际 WPF 界面的示例数据截图。截图对应 v0.5.0，新版 Windows ZIP 已包含界面重构、自定义配色与点击修复。*
+*以上及下方均为实际 WPF 界面的示例数据截图。截图对应 v0.5.1，新版 Windows ZIP 已包含界面重构、自定义配色、点击修复，以及新版客户端实时状态与额度读取适配。*
 
 ## 一眼看懂当前状态
 
@@ -49,7 +49,7 @@
 
 ### 使用已发布版本
 
-1. 下载 [CodexEnhance-v0.5.0-win-x64.zip](https://github.com/hrx114514x/codex-enhance/releases/download/v0.5.0/CodexEnhance-v0.5.0-win-x64.zip)，完整解压。
+1. 下载 [CodexEnhance-v0.5.1-win-x64.zip](https://github.com/hrx114514x/codex-enhance/releases/download/v0.5.1/CodexEnhance-v0.5.1-win-x64.zip)，完整解压。
 2. 确认已安装并登录 Windows Codex 桌面客户端。
 3. 双击 **Start Codex.cmd**。
 

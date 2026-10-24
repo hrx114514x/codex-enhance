@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {EventEmitter} from 'node:events';
-import {WeeklyQuota,readAccountQuota} from '../collector/quota.mjs';
+import {WeeklyQuota,readAccountQuota,normalizeQuota} from '../collector/quota.mjs';
 import {BUNDLED_PRICING} from '../collector/price-catalog.mjs';
 
 class WorkerFake extends EventEmitter {
@@ -27,6 +27,12 @@ test('account reads run together, allow cold-start latency and never refresh cre
   assert.equal(calls[1].params.refreshToken,false);assert.equal(calls[0].options.timeoutMs,8000);
   pending[0]({rateLimits:{limitId:'codex',planType:'pro',primary:{usedPercent:20,windowDurationMins:10080,resetsAt:1792000000}}});pending[1]({account:{type:'chatgpt'}});
   assert.equal((await reading).windows[0].usedPercent,20);
+});
+
+test('missing runtime bridge is distinct from an account or rate-limit failure',async t=>{
+  const previous=globalThis.__codexEnhanceReadCache;t.after(()=>globalThis.__codexEnhanceReadCache=previous);
+  globalThis.__codexEnhanceReadCache={store:null};const raw=await readAccountQuota();
+  assert.equal(raw.reason,'runtime_unavailable');assert.equal(normalizeQuota(raw,'salt').reason,'runtime_unavailable');
 });
 test('quota refresh preserves matched percent and amount until both new readings are ready',async t=>{
   const f=fixture(t);let pct=50,account='a';const session={evaluate:async(_,timeout)=>{assert.equal(timeout,10000);return f.raw(pct,account);}};

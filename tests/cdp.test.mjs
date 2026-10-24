@@ -42,3 +42,33 @@ test('manager hook arrays are found before large unrelated React state fills the
   local.conversations.set(b,{title:'newly hydrated',turns:[]});assert.equal(readRuntimeStore(b).title,'newly hydrated');
   local.disposed=true;globalThis.__codexEnhanceReadCache.lastProbe=0;assert.equal(readRuntimeStore(a),null);
 });
+
+test('cached local signal bindings restore runtime without factories, subscriptions or writes',t=>{
+  const savedRoot=globalThis.__codexRoot,savedCache=globalThis.__codexEnhanceReadCache;
+  t.after(()=>{globalThis.__codexRoot=savedRoot;globalThis.__codexEnhanceReadCache=savedCache;});
+  const manager={hostId:'local',conversations:new Map([[a,{title:'signal runtime',turns:[]}]]),sendRequest(){}};
+  const atom={read(){},write(){}};let reads=0;
+  const forbidden=()=>{throw Error('Must not initialize, subscribe or write');};
+  const store={get(key){assert.equal(key,atom);reads++;return manager;},set:forbidden,sub:forbidden};
+  const signal={atom,store,get:forbidden,set:forbidden,subscribe:forbidden};
+  const node={store,familyBindings:new Map([
+    [{kind:'query-family',resolve:forbidden},new Map([['local',{value:signal}]])],
+    [{kind:'signal-family',resolve:forbidden},new Map([['remote',{value:signal}]])],
+    [{kind:'signal-family',resolve:forbidden},new Map([['local',{value:signal}]])]
+  ])};
+  globalThis.__codexRoot={_internalRoot:{current:{dependencies:{firstContext:{memoizedValue:new Map([['scope',node]])}}}}};
+  globalThis.__codexEnhanceReadCache=null;
+  assert.equal(readRuntimeStore(a).title,'signal runtime');assert.equal(reads,1);
+  assert.equal(readRuntimeStore(a).title,'signal runtime');assert.equal(reads,1);
+  assert.equal(readRuntimeStore(b),null);assert.equal(globalThis.__codexEnhanceReadCache.store,manager);
+});
+
+test('signal discovery skips disposed/foreign stores, tolerates retired bindings and bounds failed reads',t=>{
+  const savedRoot=globalThis.__codexRoot,savedCache=globalThis.__codexEnhanceReadCache;
+  t.after(()=>{globalThis.__codexRoot=savedRoot;globalThis.__codexEnhanceReadCache=savedCache;});
+  let reads=0;const store={get(atom){reads++;if(atom.bad)throw Error('retired');return atom.value;}};
+  const familyBindings=new Map();
+  for(let i=0;i<80;i++)familyBindings.set({kind:'signal-family'},new Map([['local',{value:{store,atom:{read(){},write(){},bad:i===0,value:{hostId:i%2?'remote':'local',disposed:true,conversations:new Map(),sendRequest(){}}}}}]]));
+  const node={store,familyBindings};globalThis.__codexRoot={_internalRoot:{current:{memoizedState:{memoizedState:{current:{node}}}}}};globalThis.__codexEnhanceReadCache=null;
+  assert.equal(readRuntimeStore(a),null);assert.ok(reads>0&&reads<=32);assert.equal(globalThis.__codexEnhanceReadCache.store,null);
+});
